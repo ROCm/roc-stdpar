@@ -51,18 +51,15 @@
     #include <thrust/uninitialized_fill.h>
     #include <thrust/unique.h>
 
-    extern "C"
-    __host__
-    __attribute__((weak))
-    void __stdpar_hidden_delete(void*);
-
     extern "C" void __libc_free(void*);
 
     namespace hipcpp
     {
+        using Header = ::std::pair<::std::size_t, ::std::size_t>;
+
         class Managed_heap final : public ::std::pmr::memory_resource {
             // TODO: add exception handling
-            void* do_allocate(::std::size_t n, ::std::size_t) override
+            void* do_allocate(::std::size_t n, ::std::size_t a) override
             {
                 void* r{};
                 hipMallocManaged(&r, n);
@@ -72,7 +69,7 @@
 
             void do_deallocate(void* p, ::std::size_t, ::std::size_t) override
             {
-                if (hipFree(p) != hipSuccess) return __libc_free(p);
+                hipFree(p);
             }
 
             bool do_is_equal(
@@ -83,8 +80,7 @@
         };
 
         inline Managed_heap mh{};
-        inline ::std::pmr::synchronized_pool_resource sph{&mh};
-        inline ::std::pmr::polymorphic_allocator<::std::byte> heap{&sph};
+        inline ::std::pmr::synchronized_pool_resource heap{&mh};
 
         class Managed_free_store final : public ::std::pmr::memory_resource {
             // TODO: add exception handling
@@ -98,7 +94,7 @@
 
             void do_deallocate(void* p, ::std::size_t, ::std::size_t) override
             {
-                if (hipFree(p) != hipSuccess) return __stdpar_hidden_delete(p);
+                hipFree(p);
             }
 
             bool do_is_equal(
@@ -109,9 +105,28 @@
         };
 
         inline Managed_free_store mr{};
-        inline ::std::pmr::synchronized_pool_resource spr{&mr};
-        inline ::std::pmr::polymorphic_allocator<::std::byte> free_store{&spr};
+        inline ::std::pmr::synchronized_pool_resource free_store{&mr};
     } // Namespace hipcpp.
+
+    extern "C"
+    inline
+    __host__
+    __attribute__((used))
+    void* __stdpar_aligned_alloc(std::size_t a, std::size_t n)
+    {   // TODO: deal with alignment.
+        auto m = __builtin_align_up(n + sizeof(hipcpp::Header), a);
+
+        auto r = hipcpp::heap.allocate(m, a);
+
+        auto h = reinterpret_cast<void*>(static_cast<hipcpp::Header*>(r) + 1);
+        if (auto p = ::std::align(a, n, h, m -= sizeof(hipcpp::Header))) {
+            static_cast<hipcpp::Header*>(p)[-1] = {m + sizeof(hipcpp::Header), a};
+
+            return p;
+        }
+
+        throw std::runtime_error{"Failed __stdpar_aligned_alloc"};
+    }
 
     extern "C"
     inline
@@ -119,7 +134,18 @@
     __attribute__((used))
     void* __stdpar_malloc(std::size_t n)
     {
-        if (auto r = hipcpp::heap.allocate(n)) return r;
+        constexpr auto a = alignof(::std::max_align_t);
+
+        auto m = __builtin_align_up(n + sizeof(hipcpp::Header), a);
+
+        auto r = hipcpp::heap.allocate(m, a);
+
+        auto h = reinterpret_cast<void*>(static_cast<hipcpp::Header*>(r) + 1);
+        if (auto p = ::std::align(a, n, h, m -= sizeof(hipcpp::Header))) {
+            static_cast<hipcpp::Header*>(p)[-1] = {m + sizeof(hipcpp::Header), a};
+
+            return p;
+        }
 
         throw std::runtime_error{"Failed __stdpar_malloc"};
     }
@@ -128,9 +154,50 @@
     inline
     __host__
     __attribute__((used))
-    void* __stdpar_aligned_alloc(std::size_t /*align*/, std::size_t n)
-    {   // TODO: deal with alignment.
-        return __stdpar_malloc(n);
+    void* __stdpar_calloc(std::size_t n, std::size_t sz)
+    {
+        return std::memset(__stdpar_malloc(n * sz), 0, n * sz);
+    }
+
+    extern "C"
+    inline
+    __host__
+    __attribute__((used))
+    int __stdpar_posix_aligned_alloc(void** p, std::size_t a, std::size_t n)
+    {   // TODO: check invariants on alignment
+        if (!p || n == 0) return 0;
+
+        *p = __stdpar_aligned_alloc(a, n);
+
+        return 1;
+    }
+
+    extern "C"
+    inline
+    __host__
+    __attribute__((used))
+    void* __stdpar_realloc(void* p, std::size_t n)
+    {
+        auto q = std::memcpy(__stdpar_malloc(n), p, n);
+
+        auto h = static_cast<hipcpp::Header*>(p) - 1;
+
+        hipPointerAttribute_t tmp{};
+        auto r = hipPointerGetAttributes(&tmp, h);
+
+        if (!tmp.isManaged) __libc_free(p);
+        else hipcpp::heap.deallocate(h, h->first, h->second);
+
+        return q;
+    }
+
+    extern "C"
+    inline
+    __host__
+    __attribute__((used))
+    void* __stdpar_reallocarray(void* p, std::size_t n, std::size_t sz)
+    {   // TODO: handle overflow in n * sz gracefully, as per spec.
+        return __stdpar_realloc(p, n * sz);
     }
 
     extern "C"
@@ -139,7 +206,34 @@
     __attribute__((used))
     void __stdpar_free(void* p)
     {
-        return hipcpp::heap.deallocate(static_cast<::std::byte*>(p), 0);
+        auto h = static_cast<hipcpp::Header*>(p) - 1;
+
+        hipPointerAttribute_t tmp{};
+        auto r = hipPointerGetAttributes(&tmp, h);
+
+        if (!tmp.isManaged) return __libc_free(p);
+
+        return hipcpp::heap.deallocate(h, h->first, h->second);
+    }
+
+    extern "C"
+    inline
+    __host__
+    __attribute__((used))
+    void* __stdpar_operator_new_aligned(std::size_t n, std::size_t a)
+    {
+        auto m = __builtin_align_up(n + sizeof(hipcpp::Header), a);
+
+        auto r = hipcpp::free_store.allocate(m, a);
+
+        auto h = reinterpret_cast<void*>(static_cast<hipcpp::Header*>(r) + 1);
+        if (auto p = ::std::align(a, n, h, m -= sizeof(hipcpp::Header))) {
+            static_cast<hipcpp::Header*>(p)[-1] = {m + sizeof(hipcpp::Header), a};
+
+            return p;
+        }
+
+        throw std::runtime_error{"Failed __stdpar_operator_new_aligned"};
     }
 
     extern "C"
@@ -148,9 +242,54 @@
     __attribute__((used))
     void* __stdpar_operator_new(std::size_t n)
     {   // TODO: consider adding the special handling specific to operator new
-        if (auto r = hipcpp::free_store.allocate(n)) return r;
+        // return __stdpar_operator_new_aligned(n, alignof(std::max_align_t));
+        constexpr auto a = alignof(::std::max_align_t);
 
-        throw std::runtime_error{"Failed __stdpar_malloc"};
+        return __stdpar_operator_new_aligned(n, a);
+    }
+
+    extern "C"
+    inline
+    __host__
+    __attribute__((used))
+    void* __stdpar_operator_new_nothrow(std::size_t n, std::nothrow_t) noexcept
+    {
+        try {
+            return __stdpar_operator_new(n);
+        }
+        catch (...) {
+            // TODO: handle the potential exception
+        }
+    }
+
+    extern "C"
+    inline
+    __host__
+    __attribute__((used))
+    void* __stdpar_operator_new_aligned_nothrow(
+        ::std::size_t n, std::size_t a, std::nothrow_t) noexcept
+    {   // TODO: consider adding the special handling specific to operator new
+        try {
+            return __stdpar_operator_new_aligned(n, a);
+        }
+        catch (...) {
+            // TODO: handle the potential exception.
+        }
+    }
+
+    extern "C"
+    inline
+    __host__
+    __attribute__((used))
+    void __stdpar_operator_delete_aligned_sized(
+        void* p, std::size_t n, std::size_t a) noexcept
+    {
+        hipPointerAttribute_t tmp{};
+        auto r = hipPointerGetAttributes(&tmp, p);
+
+        if (!tmp.isManaged) return __libc_free(p);
+
+        return hipcpp::free_store.deallocate(p, n, a);
     }
 
     extern "C"
@@ -159,7 +298,39 @@
     __attribute__((used))
     void __stdpar_operator_delete(void* p) noexcept
     {
-        return hipcpp::free_store.deallocate(static_cast<::std::byte*>(p), 0);
+        auto h = static_cast<hipcpp::Header*>(p) - 1;
+
+        hipPointerAttribute_t tmp{};
+        auto r = hipPointerGetAttributes(&tmp, h);
+
+        if (!tmp.isManaged) return __libc_free(p);
+
+        return hipcpp::free_store.deallocate(h, h->first, h->second);
+    }
+
+    extern "C"
+    inline
+    __host__
+    __attribute__((used))
+    void __stdpar_operator_delete_aligned(void* p, std::size_t) noexcept
+    {   // TODO: use alignment
+        auto h = static_cast<hipcpp::Header*>(p) - 1;
+
+        hipPointerAttribute_t tmp{};
+        auto r = hipPointerGetAttributes(&tmp, h);
+
+        if (!tmp.isManaged) return __libc_free(p);
+
+        return hipcpp::free_store.deallocate(h, h->first, h->second);
+    }
+
+    extern "C"
+    inline
+    __host__
+    __attribute__((used))
+    void __stdpar_operator_delete_sized(void* p, std::size_t) noexcept
+    {   // TODO: should exploit the size here
+        return __stdpar_operator_delete(p);
     }
 
     namespace hipcpp
