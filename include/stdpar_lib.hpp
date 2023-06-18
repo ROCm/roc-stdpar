@@ -51,8 +51,6 @@
     #include <thrust/uninitialized_fill.h>
     #include <thrust/unique.h>
 
-    extern "C" void __libc_free(void*);
-
     namespace hipcpp
     {
         using Header = ::std::pair<::std::size_t, ::std::size_t>;
@@ -81,31 +79,6 @@
 
         inline Managed_heap mh{};
         inline ::std::pmr::synchronized_pool_resource heap{&mh};
-
-        class Managed_free_store final : public ::std::pmr::memory_resource {
-            // TODO: add exception handling
-            void* do_allocate(::std::size_t n, ::std::size_t) override
-            {
-                void* r{};
-                hipMallocManaged(&r, n);
-
-                return r;
-            }
-
-            void do_deallocate(void* p, ::std::size_t, ::std::size_t) override
-            {
-                hipFree(p);
-            }
-
-            bool do_is_equal(
-                const ::std::pmr::memory_resource& x) const noexcept override
-            {
-                return dynamic_cast<const Managed_free_store*>(&x);
-            }
-        };
-
-        inline Managed_free_store mr{};
-        inline ::std::pmr::synchronized_pool_resource free_store{&mr};
     } // Namespace hipcpp.
 
     extern "C"
@@ -172,6 +145,8 @@
         return 1;
     }
 
+    extern "C" __attribute__((weak)) void __stdpar_hidden_free(void*);
+
     extern "C"
     inline
     __host__
@@ -185,7 +160,7 @@
         hipPointerAttribute_t tmp{};
         auto r = hipPointerGetAttributes(&tmp, h);
 
-        if (!tmp.isManaged) __libc_free(p);
+        if (!tmp.isManaged) __stdpar_hidden_free(p);
         else hipcpp::heap.deallocate(h, h->first, h->second);
 
         return q;
@@ -195,7 +170,7 @@
     inline
     __host__
     __attribute__((used))
-    void* __stdpar_reallocarray(void* p, std::size_t n, std::size_t sz)
+    void* __stdpar_realloc_array(void* p, std::size_t n, std::size_t sz)
     {   // TODO: handle overflow in n * sz gracefully, as per spec.
         return __stdpar_realloc(p, n * sz);
     }
@@ -211,7 +186,7 @@
         hipPointerAttribute_t tmp{};
         auto r = hipPointerGetAttributes(&tmp, h);
 
-        if (!tmp.isManaged) return __libc_free(p);
+        if (!tmp.isManaged) return __stdpar_hidden_free(p);
 
         return hipcpp::heap.deallocate(h, h->first, h->second);
     }
@@ -224,7 +199,7 @@
     {
         auto m = __builtin_align_up(n + sizeof(hipcpp::Header), a);
 
-        auto r = hipcpp::free_store.allocate(m, a);
+        auto r = hipcpp::heap.allocate(m, a);
 
         auto h = reinterpret_cast<void*>(static_cast<hipcpp::Header*>(r) + 1);
         if (auto p = ::std::align(a, n, h, m -= sizeof(hipcpp::Header))) {
@@ -287,9 +262,9 @@
         hipPointerAttribute_t tmp{};
         auto r = hipPointerGetAttributes(&tmp, p);
 
-        if (!tmp.isManaged) return __libc_free(p);
+        if (!tmp.isManaged) return __stdpar_hidden_free(p);
 
-        return hipcpp::free_store.deallocate(p, n, a);
+        return hipcpp::heap.deallocate(p, n, a);
     }
 
     extern "C"
@@ -303,9 +278,9 @@
         hipPointerAttribute_t tmp{};
         auto r = hipPointerGetAttributes(&tmp, h);
 
-        if (!tmp.isManaged) return __libc_free(p);
+        if (!tmp.isManaged) return __stdpar_hidden_free(p);
 
-        return hipcpp::free_store.deallocate(h, h->first, h->second);
+        return hipcpp::heap.deallocate(h, h->first, h->second);
     }
 
     extern "C"
@@ -319,9 +294,9 @@
         hipPointerAttribute_t tmp{};
         auto r = hipPointerGetAttributes(&tmp, h);
 
-        if (!tmp.isManaged) return __libc_free(p);
+        if (!tmp.isManaged) return __stdpar_hidden_free(p);
 
-        return hipcpp::free_store.deallocate(h, h->first, h->second);
+        return hipcpp::heap.deallocate(h, h->first, h->second);
     }
 
     extern "C"
