@@ -1,24 +1,10 @@
 #pragma once
 
-#if defined(__HIP__)
+#if defined(__HIP_STDPAR__)
     #warning Using STDPAR Acceleration (temporary debug message)
 
-    #if !defined(__CLANG_HIP_RUNTIME_WRAPPER_H__)
-        #define __host__ __attribute__((host))
-        #define __device__ __attribute__((device))
-        #define __global__ __attribute__((global))
-        #define __shared__ __attribute__((shared))
-        #define __constant__ __attribute__((constant))
-        #define __managed__ __attribute__((managed))
-    #endif
-
-    #include <execution>
-    #include <functional>
-    #include <iterator>
-    #include <memory>
-    #include <memory_resource>
-    #include <type_traits>
-    #include <utility>
+    #define __llvm_amdgcn_rcp_f16(...) _Float16{}
+    #define __llvm_amdgcn_rcp_2f16(...) {_Float16{}, _Float16{}}
 
     #include <thrust/adjacent_difference.h>
     #include <thrust/copy.h>
@@ -51,275 +37,241 @@
     #include <thrust/uninitialized_fill.h>
     #include <thrust/unique.h>
 
-    namespace hipcpp
-    {
-        using Header = ::std::pair<::std::size_t, ::std::size_t>;
+    #include <execution>
+    #include <functional>
+    #include <iterator>
+    #include <type_traits>
 
-        class Managed_heap final : public ::std::pmr::memory_resource {
-            // TODO: add exception handling
-            void* do_allocate(::std::size_t n, ::std::size_t a) override
-            {
-                void* r{};
-                hipMallocManaged(&r, n);
+    #if defined(__HIP_STDPAR_INTERPOSE_ALLOC__)
+        #include <hip/hip_runtime.h>
 
-                return r;
+        #include <cstddef>
+        #include <cstdint>
+        #include <memory>
+        #include <memory_resource>
+        #include <stdexcept>
+        #include <utility>
+
+        namespace hipstd
+        {
+            using Header = std::pair<std::size_t, std::size_t>;
+
+            inline std::pmr::synchronized_pool_resource heap{[]() {
+                static class final : public std::pmr::memory_resource {
+                    // TODO: add exception handling
+                    void* do_allocate(std::size_t n, std::size_t a) override
+                    {
+                        void* r{};
+                        hipMallocManaged(&r, n);
+
+                        return r;
+                    }
+
+                    void do_deallocate(void* p, std::size_t, std::size_t) override
+                    {
+                        hipFree(p);
+                    }
+
+                    bool do_is_equal(
+                        const std::pmr::memory_resource& x) const noexcept override
+                    {
+                        return dynamic_cast<const decltype(this)>(&x);
+                    }
+                } r;
+
+                return &r;
+            }()};
+        } // Namespace hipstd.
+
+        extern "C"
+        inline
+        __attribute__((used))
+        void* __stdpar_aligned_alloc(std::size_t a, std::size_t n)
+        {   // TODO: deal with alignment.
+            auto m = __builtin_align_up(n + sizeof(hipstd::Header), a);
+
+            auto r = hipstd::heap.allocate(m, a);
+
+            auto h = reinterpret_cast<void*>(static_cast<hipstd::Header*>(r) + 1);
+            if (auto p = std::align(a, n, h, m -= sizeof(hipstd::Header))) {
+                static_cast<hipstd::Header*>(p)[-1] = {m + sizeof(hipstd::Header), a};
+
+                return p;
             }
 
-            void do_deallocate(void* p, ::std::size_t, ::std::size_t) override
-            {
-                hipFree(p);
+            return nullptr;
+        }
+
+        extern "C"
+        inline
+        __attribute__((used))
+        void* __stdpar_malloc(std::size_t n)
+        {
+            constexpr auto a = alignof(std::max_align_t);
+
+            return __stdpar_aligned_alloc(a, n);
+        }
+
+        extern "C"
+        inline
+        __attribute__((used))
+        void* __stdpar_calloc(std::size_t n, std::size_t sz)
+        {
+            return std::memset(__stdpar_malloc(n * sz), 0, n * sz);
+        }
+
+        extern "C"
+        inline
+        __attribute__((used))
+        int __stdpar_posix_aligned_alloc(void** p, std::size_t a, std::size_t n)
+        {   // TODO: check invariants on alignment
+            if (!p || n == 0) return 0;
+
+            *p = __stdpar_aligned_alloc(a, n);
+
+            return 1;
+        }
+
+        extern "C" __attribute__((weak)) void __stdpar_hidden_free(void*);
+
+        extern "C"
+        inline
+        __attribute__((used))
+        void* __stdpar_realloc(void* p, std::size_t n)
+        {
+            auto q = std::memcpy(__stdpar_malloc(n), p, n);
+
+            auto h = static_cast<hipstd::Header*>(p) - 1;
+
+            hipPointerAttribute_t tmp{};
+            auto r = hipPointerGetAttributes(&tmp, h);
+
+            if (!tmp.isManaged) __stdpar_hidden_free(p);
+            else hipstd::heap.deallocate(h, h->first, h->second);
+
+            return q;
+        }
+
+        extern "C"
+        inline
+        __attribute__((used))
+        void* __stdpar_realloc_array(void* p, std::size_t n, std::size_t sz)
+        {   // TODO: handle overflow in n * sz gracefully, as per spec.
+            return __stdpar_realloc(p, n * sz);
+        }
+
+        extern "C"
+        inline
+        __attribute__((used))
+        void __stdpar_free(void* p)
+        {
+            auto h = static_cast<hipstd::Header*>(p) - 1;
+
+            hipPointerAttribute_t tmp{};
+            auto r = hipPointerGetAttributes(&tmp, h);
+
+            if (!tmp.isManaged) return __stdpar_hidden_free(p);
+
+            return hipstd::heap.deallocate(h, h->first, h->second);
+        }
+
+        extern "C"
+        inline
+        __attribute__((used))
+        void* __stdpar_operator_new_aligned(std::size_t n, std::size_t a)
+        {
+            if (auto p = __stdpar_aligned_alloc(a, n)) return p;
+
+            throw std::runtime_error{"Failed __stdpar_operator_new_aligned"};
+        }
+
+        extern "C"
+        inline
+        __attribute__((used))
+        void* __stdpar_operator_new(std::size_t n)
+        {   // TODO: consider adding the special handling specific to operator new
+            return __stdpar_operator_new_aligned(n, alignof(std::max_align_t));
+        }
+
+        extern "C"
+        inline
+        __attribute__((used))
+        void* __stdpar_operator_new_nothrow(
+            std::size_t n, std::nothrow_t) noexcept
+        {
+            try {
+                return __stdpar_operator_new(n);
             }
-
-            bool do_is_equal(
-                const ::std::pmr::memory_resource& x) const noexcept override
-            {
-                return dynamic_cast<const Managed_heap*>(&x);
+            catch (...) {
+                // TODO: handle the potential exception
             }
-        };
-
-        inline Managed_heap mh{};
-        inline ::std::pmr::synchronized_pool_resource heap{&mh};
-    } // Namespace hipcpp.
-
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void* __stdpar_aligned_alloc(std::size_t a, std::size_t n)
-    {   // TODO: deal with alignment.
-        auto m = __builtin_align_up(n + sizeof(hipcpp::Header), a);
-
-        auto r = hipcpp::heap.allocate(m, a);
-
-        auto h = reinterpret_cast<void*>(static_cast<hipcpp::Header*>(r) + 1);
-        if (auto p = ::std::align(a, n, h, m -= sizeof(hipcpp::Header))) {
-            static_cast<hipcpp::Header*>(p)[-1] = {m + sizeof(hipcpp::Header), a};
-
-            return p;
         }
 
-        throw std::runtime_error{"Failed __stdpar_aligned_alloc"};
-    }
-
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void* __stdpar_malloc(std::size_t n)
-    {
-        constexpr auto a = alignof(::std::max_align_t);
-
-        auto m = __builtin_align_up(n + sizeof(hipcpp::Header), a);
-
-        auto r = hipcpp::heap.allocate(m, a);
-
-        auto h = reinterpret_cast<void*>(static_cast<hipcpp::Header*>(r) + 1);
-        if (auto p = ::std::align(a, n, h, m -= sizeof(hipcpp::Header))) {
-            static_cast<hipcpp::Header*>(p)[-1] = {m + sizeof(hipcpp::Header), a};
-
-            return p;
+        extern "C"
+        inline
+        __attribute__((used))
+        void* __stdpar_operator_new_aligned_nothrow(
+            std::size_t n, std::size_t a, std::nothrow_t) noexcept
+        {   // TODO: consider adding the special handling specific to operator new
+            try {
+                return __stdpar_operator_new_aligned(n, a);
+            }
+            catch (...) {
+                // TODO: handle the potential exception.
+            }
         }
 
-        throw std::runtime_error{"Failed __stdpar_malloc"};
-    }
+        extern "C"
+        inline
+        __attribute__((used))
+        void __stdpar_operator_delete_aligned_sized(
+            void* p, std::size_t n, std::size_t a) noexcept
+        {
+            hipPointerAttribute_t tmp{};
+            auto r = hipPointerGetAttributes(&tmp, p);
 
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void* __stdpar_calloc(std::size_t n, std::size_t sz)
-    {
-        return std::memset(__stdpar_malloc(n * sz), 0, n * sz);
-    }
+            if (!tmp.isManaged) return __stdpar_hidden_free(p);
 
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    int __stdpar_posix_aligned_alloc(void** p, std::size_t a, std::size_t n)
-    {   // TODO: check invariants on alignment
-        if (!p || n == 0) return 0;
-
-        *p = __stdpar_aligned_alloc(a, n);
-
-        return 1;
-    }
-
-    extern "C" __attribute__((weak)) void __stdpar_hidden_free(void*);
-
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void* __stdpar_realloc(void* p, std::size_t n)
-    {
-        auto q = std::memcpy(__stdpar_malloc(n), p, n);
-
-        auto h = static_cast<hipcpp::Header*>(p) - 1;
-
-        hipPointerAttribute_t tmp{};
-        auto r = hipPointerGetAttributes(&tmp, h);
-
-        if (!tmp.isManaged) __stdpar_hidden_free(p);
-        else hipcpp::heap.deallocate(h, h->first, h->second);
-
-        return q;
-    }
-
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void* __stdpar_realloc_array(void* p, std::size_t n, std::size_t sz)
-    {   // TODO: handle overflow in n * sz gracefully, as per spec.
-        return __stdpar_realloc(p, n * sz);
-    }
-
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void __stdpar_free(void* p)
-    {
-        auto h = static_cast<hipcpp::Header*>(p) - 1;
-
-        hipPointerAttribute_t tmp{};
-        auto r = hipPointerGetAttributes(&tmp, h);
-
-        if (!tmp.isManaged) return __stdpar_hidden_free(p);
-
-        return hipcpp::heap.deallocate(h, h->first, h->second);
-    }
-
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void* __stdpar_operator_new_aligned(std::size_t n, std::size_t a)
-    {
-        auto m = __builtin_align_up(n + sizeof(hipcpp::Header), a);
-
-        auto r = hipcpp::heap.allocate(m, a);
-
-        auto h = reinterpret_cast<void*>(static_cast<hipcpp::Header*>(r) + 1);
-        if (auto p = ::std::align(a, n, h, m -= sizeof(hipcpp::Header))) {
-            static_cast<hipcpp::Header*>(p)[-1] = {m + sizeof(hipcpp::Header), a};
-
-            return p;
+            return hipstd::heap.deallocate(p, n, a);
         }
 
-        throw std::runtime_error{"Failed __stdpar_operator_new_aligned"};
-    }
-
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void* __stdpar_operator_new(std::size_t n)
-    {   // TODO: consider adding the special handling specific to operator new
-        // return __stdpar_operator_new_aligned(n, alignof(std::max_align_t));
-        constexpr auto a = alignof(::std::max_align_t);
-
-        return __stdpar_operator_new_aligned(n, a);
-    }
-
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void* __stdpar_operator_new_nothrow(std::size_t n, std::nothrow_t) noexcept
-    {
-        try {
-            return __stdpar_operator_new(n);
+        extern "C"
+        inline
+        __attribute__((used))
+        void __stdpar_operator_delete(void* p) noexcept
+        {
+            return __stdpar_free(p);
         }
-        catch (...) {
-            // TODO: handle the potential exception
+
+        extern "C"
+        inline
+        __attribute__((used))
+        void __stdpar_operator_delete_aligned(void* p, std::size_t) noexcept
+        {   // TODO: use alignment
+            return __stdpar_free(p);
         }
-    }
 
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void* __stdpar_operator_new_aligned_nothrow(
-        ::std::size_t n, std::size_t a, std::nothrow_t) noexcept
-    {   // TODO: consider adding the special handling specific to operator new
-        try {
-            return __stdpar_operator_new_aligned(n, a);
+        extern "C"
+        inline
+        __attribute__((used))
+        void __stdpar_operator_delete_sized(void* p, std::size_t) noexcept
+        {   // TODO: should exploit the size here
+            return __stdpar_operator_delete(p);
         }
-        catch (...) {
-            // TODO: handle the potential exception.
-        }
-    }
+    #endif
 
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void __stdpar_operator_delete_aligned_sized(
-        void* p, std::size_t n, std::size_t a) noexcept
-    {
-        hipPointerAttribute_t tmp{};
-        auto r = hipPointerGetAttributes(&tmp, p);
-
-        if (!tmp.isManaged) return __stdpar_hidden_free(p);
-
-        return hipcpp::heap.deallocate(p, n, a);
-    }
-
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void __stdpar_operator_delete(void* p) noexcept
-    {
-        auto h = static_cast<hipcpp::Header*>(p) - 1;
-
-        hipPointerAttribute_t tmp{};
-        auto r = hipPointerGetAttributes(&tmp, h);
-
-        if (!tmp.isManaged) return __stdpar_hidden_free(p);
-
-        return hipcpp::heap.deallocate(h, h->first, h->second);
-    }
-
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void __stdpar_operator_delete_aligned(void* p, std::size_t) noexcept
-    {   // TODO: use alignment
-        auto h = static_cast<hipcpp::Header*>(p) - 1;
-
-        hipPointerAttribute_t tmp{};
-        auto r = hipPointerGetAttributes(&tmp, h);
-
-        if (!tmp.isManaged) return __stdpar_hidden_free(p);
-
-        return hipcpp::heap.deallocate(h, h->first, h->second);
-    }
-
-    extern "C"
-    inline
-    __host__
-    __attribute__((used))
-    void __stdpar_operator_delete_sized(void* p, std::size_t) noexcept
-    {   // TODO: should exploit the size here
-        return __stdpar_operator_delete(p);
-    }
-
-    namespace hipcpp
+    namespace hipstd
     {
         template<typename I>
-        using IsRandomAccessIterator = ::std::is_same<
-            typename ::std::iterator_traits<I>::iterator_category,
-            ::std::random_access_iterator_tag>;
+        using IsRandomAccessIterator = std::is_same<
+            typename std::iterator_traits<I>::iterator_category,
+            std::random_access_iterator_tag>;
         template<typename I>
         inline constexpr bool IsRandomAccessIterator_v =
             IsRandomAccessIterator<I>::value;
         template<typename... Is>
         inline constexpr bool AreRandomAccessIterators_v =
-            ::std::conjunction_v<IsRandomAccessIterator<Is>...>;
+            std::conjunction_v<IsRandomAccessIterator<Is>...>;
     }
 
     namespace std
@@ -330,7 +282,7 @@
             typename I,
             typename O,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O adjacent_difference(
             execution::parallel_unsequenced_policy, I fi, I li, O fo)
@@ -343,7 +295,7 @@
             typename O,
             typename Op,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O adjacent_difference(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
@@ -357,7 +309,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/adjacent_find
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I adjacent_find(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -372,7 +324,7 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I adjacent_find(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
@@ -390,7 +342,7 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         bool all_of(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
@@ -403,7 +355,7 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         bool any_of(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
@@ -416,7 +368,7 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
         {
@@ -430,7 +382,7 @@
             typename I,
             typename O,
             typename P,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo, P p)
         {
@@ -445,7 +397,7 @@
             typename I,
             typename N,
             typename O,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O copy_n(execution::parallel_unsequenced_policy, I fi, N n, O fo)
         {
@@ -479,7 +431,7 @@
         // https://en.cppreference.com/w/cpp/memory/destroy
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void destroy(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -494,7 +446,7 @@
         template<
             typename I,
             typename N,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void destroy_n(execution::parallel_unsequenced_policy, I f, N n)
         {
@@ -510,7 +462,7 @@
             typename I0,
             typename I1,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         bool equal(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
         {
@@ -522,7 +474,7 @@
             typename I1,
             typename R,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         bool equal(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, R r)
@@ -535,7 +487,7 @@
             typename I0,
             typename I1,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         bool equal(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
@@ -550,7 +502,7 @@
             typename I1,
             typename R,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         bool equal(
             execution::parallel_unsequenced_policy,
@@ -573,7 +525,7 @@
             typename I,
             typename O,
             typename T,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O exclusive_scan(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, T x)
@@ -587,7 +539,7 @@
             typename O,
             typename T,
             typename Op,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O exclusive_scan(
             execution::parallel_unsequenced_policy,
@@ -607,7 +559,7 @@
         template<
             typename I,
             typename T,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void fill(execution::parallel_unsequenced_policy, I f, I l, const T& x)
         {
@@ -621,7 +573,7 @@
             typename I,
             typename N,
             typename T,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void fill_n(
             execution::parallel_unsequenced_policy, I f, N n, const T& x)
@@ -635,7 +587,7 @@
         template<
             typename I,
             typename T,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I find(execution::parallel_unsequenced_policy, I f, I l, const T& x)
         {
@@ -658,7 +610,7 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I find_if(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
@@ -671,7 +623,7 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I find_if_not(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
@@ -685,7 +637,7 @@
         template<
             typename I,
             typename F,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void for_each(execution::parallel_unsequenced_policy, I f, I l, F fn)
         {
@@ -699,7 +651,7 @@
             typename I,
             typename N,
             typename F,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I for_each_n(execution::parallel_unsequenced_policy, I f, N n, F fn)
         {
@@ -713,7 +665,7 @@
         template<
             typename I,
             typename G,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void generate(execution::parallel_unsequenced_policy, I f, I l, G g)
         {
@@ -727,7 +679,7 @@
             typename I,
             typename N,
             typename G,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void generate_n(execution::parallel_unsequenced_policy, I f, N n, G g)
         {
@@ -741,7 +693,7 @@
             typename I0,
             typename I1,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         bool includes(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
@@ -757,7 +709,7 @@
             typename I1,
             typename R,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         bool includes(
             execution::parallel_unsequenced_policy,
@@ -780,7 +732,7 @@
             typename I,
             typename O,
             typename T,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O inclusive_scan(
             execution::parallel_unsequenced_policy, I fi, I li, O fo)
@@ -792,7 +744,7 @@
             typename I,
             typename O,
             typename Op,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O inclusive_scan(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
@@ -806,7 +758,7 @@
             typename O,
             typename Op,
             typename T,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O inclusive_scan(
             execution::parallel_unsequenced_policy,
@@ -853,7 +805,7 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         bool is_partitioned(
             execution::parallel_unsequenced_policy, I f, I l, P p)
@@ -867,7 +819,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/is_sorted
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         bool is_sorted(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -877,7 +829,7 @@
         template<
             typename I,
             typename R,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         bool is_sorted(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
@@ -889,7 +841,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/is_sorted_until
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -899,7 +851,7 @@
         template<
             typename I,
             typename R,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
@@ -914,7 +866,7 @@
             typename I0,
             typename I1,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         bool lexicographical_compare(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
         {
@@ -937,7 +889,7 @@
             typename I1,
             typename R,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         bool lexicographical_compare(
             execution::parallel_unsequenced_policy,
             I0 f0,
@@ -970,7 +922,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/max_element
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I max_element(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -980,7 +932,7 @@
         template<
             typename I,
             typename R,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I max_element(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
@@ -996,7 +948,7 @@
             typename I1,
             typename O,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
         O merge(
             execution::parallel_unsequenced_policy,
@@ -1015,7 +967,7 @@
             typename O,
             typename R,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
         O merge(
             execution::parallel_unsequenced_policy,
@@ -1035,7 +987,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/min_element
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I min_element(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -1045,7 +997,7 @@
         template<
             typename I,
             typename R,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I min_element(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
@@ -1058,7 +1010,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/minmax_element
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         pair<I, I> minmax_element(
             execution::parallel_unsequenced_policy, I f, I l)
@@ -1071,7 +1023,7 @@
         template<
             typename I,
             typename R,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         pair<I, I> minmax_element(
             execution::parallel_unsequenced_policy, I f, I l, R r)
@@ -1089,7 +1041,7 @@
             typename I0,
             typename I1,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         pair<I0, I1> mismatch(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
@@ -1104,7 +1056,7 @@
             typename I1,
             typename P,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         pair<I0, I1> mismatch(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, P p)
@@ -1119,7 +1071,7 @@
             typename I0,
             typename I1,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         pair<I0, I1> mismatch(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
@@ -1137,7 +1089,7 @@
             typename I1,
             typename P,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         pair<I0, I1> mismatch(
             execution::parallel_unsequenced_policy,
@@ -1161,7 +1113,7 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O move(execution::parallel_unsequenced_policy, I fi, I li, O fo)
         {
@@ -1178,7 +1130,7 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         bool none_of(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
@@ -1206,7 +1158,7 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I partition(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
@@ -1222,7 +1174,7 @@
             typename O1,
             typename P,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I, O0, O1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I, O0, O1>>* = nullptr>
         inline
         pair<O0, O1> partition_copy(
             execution::parallel_unsequenced_policy,
@@ -1243,7 +1195,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/reduce
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         typename iterator_traits<I>::value_type reduce(
             execution::parallel_unsequenced_policy, I f, I l)
@@ -1254,7 +1206,7 @@
         template<
             typename I,
             typename T,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         T reduce(execution::parallel_unsequenced_policy, I f, I l, T x)
         {
@@ -1265,7 +1217,7 @@
             typename I,
             typename T,
             typename Op,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         T reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op op)
         {
@@ -1279,7 +1231,7 @@
         template<
             typename I,
             typename T,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I remove(execution::parallel_unsequenced_policy, I f, I l, const T& x)
         {
@@ -1293,7 +1245,7 @@
             typename I,
             typename O,
             typename T,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O remove_copy(
             execution::parallel_unsequenced_policy,
@@ -1312,7 +1264,7 @@
             typename I,
             typename O,
             typename P,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O remove_copy_if(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, P p)
@@ -1327,7 +1279,7 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I remove_if(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
@@ -1340,7 +1292,7 @@
         template<
             typename I,
             typename T,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void replace(
             execution::parallel_unsequenced_policy,
@@ -1359,7 +1311,7 @@
             typename I,
             typename O,
             typename T,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         void replace_copy(
             execution::parallel_unsequenced_policy,
@@ -1380,7 +1332,7 @@
             typename O,
             typename P,
             typename T,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         void replace_copy_if(
             execution::parallel_unsequenced_policy,
@@ -1401,7 +1353,7 @@
             typename I,
             typename P,
             typename T,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void replace_if(
             execution::parallel_unsequenced_policy, I f, I l, P p, const T& x)
@@ -1415,7 +1367,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/reverse
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void reverse(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -1428,7 +1380,7 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         void reverse_copy(
             execution::parallel_unsequenced_policy, I fi, I li, O fo)
@@ -1454,7 +1406,7 @@
             typename I1,
             typename O,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
         O set_difference(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
         {
@@ -1468,7 +1420,7 @@
             typename O,
             typename R,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
         O set_difference(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
         {
@@ -1484,7 +1436,7 @@
             typename I1,
             typename O,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
         O set_intersection(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
         {
@@ -1498,7 +1450,7 @@
             typename O,
             typename R,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
         O set_intersection(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
         {
@@ -1514,7 +1466,7 @@
             typename I1,
             typename O,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
         O set_symmetric_difference(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
         {
@@ -1528,7 +1480,7 @@
             typename O,
             typename R,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
         O set_symmetric_difference(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
         {
@@ -1544,7 +1496,7 @@
             typename I1,
             typename O,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
         O set_union(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
         {
@@ -1558,7 +1510,7 @@
             typename O,
             typename R,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
         O set_union(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
         {
@@ -1571,7 +1523,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/sort
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void sort(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -1581,7 +1533,7 @@
         template<
             typename I,
             typename R,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void sort(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
@@ -1594,7 +1546,7 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I stable_partition(
             execution::parallel_unsequenced_policy, I f, I l, P p)
@@ -1608,7 +1560,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/stable_sort
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void stable_sort(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -1618,7 +1570,7 @@
         template<
             typename I,
             typename R,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void stable_sort(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
@@ -1633,7 +1585,7 @@
             typename I0,
             typename I1,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         I1 swap_ranges(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
@@ -1648,7 +1600,7 @@
             typename I,
             typename O,
             typename F,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O transform(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, F fn)
@@ -1663,7 +1615,7 @@
             typename O,
             typename F,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
         O transform(
             execution::parallel_unsequenced_policy,
@@ -1686,7 +1638,7 @@
             typename T,
             typename Op0,
             typename Op1,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O transform_exclusive_scan(
             execution::parallel_unsequenced_policy,
@@ -1715,7 +1667,7 @@
             typename O,
             typename Op0,
             typename Op1,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O transform_inclusive_scan(
             execution::parallel_unsequenced_policy,
@@ -1740,7 +1692,7 @@
             typename Op0,
             typename Op1,
             typename T,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O transform_inclusive_scan(
             execution::parallel_unsequenced_policy,
@@ -1779,7 +1731,7 @@
             typename I1,
             typename T,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         T transform_reduce(
             execution::parallel_unsequenced_policy,
@@ -1799,7 +1751,7 @@
             typename Op0,
             typename Op1,
             enable_if_t<
-                ::hipcpp::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
         inline
         T transform_reduce(
             execution::parallel_unsequenced_policy,
@@ -1825,7 +1777,7 @@
             typename T,
             typename Op0,
             typename Op1,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         T transform_reduce(
             execution::parallel_unsequenced_policy,
@@ -1850,7 +1802,7 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O uninitialized_copy(
             execution::parallel_unsequenced_policy, I fi, I li, O fo)
@@ -1865,7 +1817,7 @@
             typename I,
             typename N,
             typename O,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O uninitialized_copy(
             execution::parallel_unsequenced_policy, I fi, N n, O fo)
@@ -1878,7 +1830,7 @@
         // https://en.cppreference.com/w/cpp/memory/uninitialized_default_construct
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void uninitialized_default_construct(
             execution::parallel_unsequenced_policy, I f, I l)
@@ -1896,7 +1848,7 @@
         template<
             typename I,
             typename N,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void uninitialized_default_construct_N(
             execution::parallel_unsequenced_policy, I f, N n)
@@ -1914,7 +1866,7 @@
         template<
             typename I,
             typename T,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void uninitialized_fill(
             execution::parallel_unsequenced_policy, I f, I l, const T& x)
@@ -1929,7 +1881,7 @@
             typename I,
             typename N,
             typename T,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void uninitialized_fill(
             execution::parallel_unsequenced_policy, I f, N n, const T& x)
@@ -1943,7 +1895,7 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O uninitialized_move(
             execution::parallel_unsequenced_policy, I fi, I li, O fo)
@@ -1962,7 +1914,7 @@
             typename I,
             typename N,
             typename O,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O uninitialized_move_n(
             execution::parallel_unsequenced_policy, I fi, N n, O fo)
@@ -1976,7 +1928,7 @@
         // https://en.cppreference.com/w/cpp/memory/uninitialized_value_construct
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void uninitialized_value_construct(
             execution::parallel_unsequenced_policy, I f, I l)
@@ -1994,7 +1946,7 @@
         template<
             typename I,
             typename N,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         void uninitialized_value_construct_n(
             execution::parallel_unsequenced_policy, I f, N n)
@@ -2011,7 +1963,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/unique
         template<
             typename I,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I unique(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -2021,7 +1973,7 @@
         template<
             typename I,
             typename R,
-            enable_if_t<::hipcpp::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
         inline
         I unique(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
@@ -2034,7 +1986,7 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O unique_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
         {
@@ -2045,7 +1997,7 @@
             typename I,
             typename O,
             typename R,
-            enable_if_t<::hipcpp::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
         inline
         O unique_copy(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, R r)
@@ -2055,6 +2007,4 @@
         }
         // END UNIQUE_COPY
     }
-#else
-    #error "Including the Accelerated Standard Parallel Algorithm Library without HIP is not permitted"
 #endif
