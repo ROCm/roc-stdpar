@@ -1,3 +1,25 @@
+// MIT License
+//
+// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #pragma once
 
 #if defined(__HIP_STDPAR__)
@@ -67,13 +89,15 @@
                         return r;
                     }
 
-                    void do_deallocate(void* p, std::size_t, std::size_t) override
+                    void do_deallocate(
+                        void* p, std::size_t, std::size_t) override
                     {
                         hipFree(p);
                     }
 
                     bool do_is_equal(
-                        const std::pmr::memory_resource& x) const noexcept override
+                        const std::pmr::memory_resource& x)
+                            const noexcept override
                     {
                         return dynamic_cast<const decltype(this)>(&x);
                     }
@@ -92,9 +116,11 @@
 
             auto r = hipstd::heap.allocate(m, a);
 
-            auto h = reinterpret_cast<void*>(static_cast<hipstd::Header*>(r) + 1);
+            auto h =
+                reinterpret_cast<void*>(static_cast<hipstd::Header*>(r) + 1);
             if (auto p = std::align(a, n, h, m -= sizeof(hipstd::Header))) {
-                static_cast<hipstd::Header*>(p)[-1] = {m + sizeof(hipstd::Header), a};
+                static_cast<hipstd::Header*>(p)[-1] =
+                    {m + sizeof(hipstd::Header), a};
 
                 return p;
             }
@@ -189,7 +215,7 @@
         inline
         __attribute__((used))
         void* __stdpar_operator_new(std::size_t n)
-        {   // TODO: consider adding the special handling specific to operator new
+        {   // TODO: consider adding the special handling for operator new
             return __stdpar_operator_new_aligned(n, alignof(std::max_align_t));
         }
 
@@ -212,7 +238,7 @@
         __attribute__((used))
         void* __stdpar_operator_new_aligned_nothrow(
             std::size_t n, std::size_t a, std::nothrow_t) noexcept
-        {   // TODO: consider adding the special handling specific to operator new
+        {   // TODO: consider adding the special handling for operator new
             try {
                 return __stdpar_operator_new_aligned(n, a);
             }
