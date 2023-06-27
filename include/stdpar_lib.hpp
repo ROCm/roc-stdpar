@@ -890,6 +890,7 @@
             typename I1,
             enable_if_t<
                 ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+        inline
         bool lexicographical_compare(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
         {
@@ -913,6 +914,7 @@
             typename R,
             enable_if_t<
                 ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+        inline
         bool lexicographical_compare(
             execution::parallel_unsequenced_policy,
             I0 f0,
