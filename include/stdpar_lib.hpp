@@ -25,9 +25,6 @@
 #if defined(__HIP_STDPAR__)
     #warning Using STDPAR Acceleration (temporary debug message)
 
-    #define __llvm_amdgcn_rcp_f16(...) _Float16{}
-    #define __llvm_amdgcn_rcp_2f16(...) {_Float16{}, _Float16{}}
-
     #include <thrust/adjacent_difference.h>
     #include <thrust/copy.h>
     #include <thrust/count.h>
