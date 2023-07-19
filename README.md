@@ -1,13 +1,19 @@
 # ROCm Standard Parallelism Runtime Implementation
 
-This repository contains the runtime component that enables ROCm to support
-GPU accelerated computation via C++ Standard Algorithms. This is an
-implementation detail and thus intended to be transparently composed with
-compiler and low-level runtime components. More specifically, since it is meant
-to be implicitly included by the compiler, and forwards various calls to the
-HIP and rocThrust libraries, its standalone uses are limited. For detailed
-documentation on ROCm GPU acceleration for Standard C++ Algorithms, please see
-the [LLVM treatment of the topic](http://tbd.tbd.com).
+This repository contains:
+
+1. The runtime component that enables ROCm to support GPU accelerated
+   computation via C++ Standard Algorithms. This is an implementation detail and
+   thus intended to be transparently composed with compiler and low-level
+   runtime components. More specifically, since it is meant to be implicitly
+   included by the compiler, and forwards various calls to the HIP and rocThrust
+   libraries, its standalone uses are limited. For detailed documentation on
+   ROCm GPU acceleration for Standard C++ Algorithms, please see the
+   [LLVM treatment of the topic](http://tbd.tbd.com);
+2. A set of diffs, under the `/data` folder, which capture the changes needed to
+   enable Standard Algorithm offload in LLVM (this is a pre-requisite), as well
+   as in a number of client apps;
+3. A minimal but slowly growing set of unit tests.
 
 ## Algorithm Support Status
 
