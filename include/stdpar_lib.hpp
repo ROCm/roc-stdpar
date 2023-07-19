@@ -22,7 +22,7 @@
 
 #pragma once
 
-#if defined(__HIP_STDPAR__)
+#if defined(__STDPAR__)
     #warning Using STDPAR Acceleration (temporary debug message)
 
     #include <thrust/adjacent_difference.h>
@@ -61,7 +61,7 @@
     #include <iterator>
     #include <type_traits>
 
-    #if defined(__HIP_STDPAR_INTERPOSE_ALLOC__)
+    #if defined(__STDPAR_INTERPOSE_ALLOC__)
         #include <hip/hip_runtime.h>
 
         #include <cstddef>
