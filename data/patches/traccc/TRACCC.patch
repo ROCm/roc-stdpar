@@ -26,7 +26,7 @@ index 5cb9198..2cd8160 100644
  
  # option for algebra plugins (ARRAY EIGEN SMATRIX VC VECMEM)
 diff --git a/benchmarks/stdpar/CMakeLists.txt b/benchmarks/stdpar/CMakeLists.txt
-index c82238b..48744aa 100644
+index c82238b..0cf4f83 100644
 --- a/benchmarks/stdpar/CMakeLists.txt
 +++ b/benchmarks/stdpar/CMakeLists.txt
 @@ -2,8 +2,10 @@ cmake_minimum_required(VERSION 3.14)
@@ -47,14 +47,14 @@ index c82238b..48744aa 100644
  set (LIB "traccc_benchmark_stdpar_cca")
  target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${LIB} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --stdpar-thrust-path=/opt/rocm/include --stdpar-prim-path=/opt/rocm/include --offload-arch=${TRACCC_STDPAR_TARGET})
++    target_compile_options(${LIB} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
 +endif ()
  target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
 +    target_link_libraries(${LIB} PRIVATE tbb)
 +endif ()
 diff --git a/device/stdpar/CMakeLists.txt b/device/stdpar/CMakeLists.txt
-index 5e2a15f..de9a2cd 100644
+index 5e2a15f..a2007c9 100644
 --- a/device/stdpar/CMakeLists.txt
 +++ b/device/stdpar/CMakeLists.txt
 @@ -30,7 +30,13 @@ traccc_add_library( ${LIB} stdpar TYPE SHARED
@@ -66,7 +66,7 @@ index 5e2a15f..de9a2cd 100644
  
  target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${LIB} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --stdpar-thrust-path=/opt/rocm/include --stdpar-prim-path=/opt/rocm/include --offload-arch=${TRACCC_STDPAR_TARGET})
++    target_compile_options(${LIB} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
 +endif ()
  target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
@@ -515,7 +515,7 @@ index c5214d8..382b73a 100644
       * cluster, but this should not be the case with real experiment data.
       */
 diff --git a/examples/run/stdpar/CMakeLists.txt b/examples/run/stdpar/CMakeLists.txt
-index dde5fa3..a724f73 100644
+index dde5fa3..baba00b 100644
 --- a/examples/run/stdpar/CMakeLists.txt
 +++ b/examples/run/stdpar/CMakeLists.txt
 @@ -8,17 +8,23 @@
@@ -529,7 +529,7 @@ index dde5fa3..a724f73 100644
  set (EXE_NAME "traccc_stdpar_sparseccl_example")
  target_compile_options(${EXE_NAME} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${EXE_NAME} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --stdpar-thrust-path=/opt/rocm/include --stdpar-prim-path=/opt/rocm/include --offload-arch=${TRACCC_STDPAR_TARGET})
++    target_compile_options(${EXE_NAME} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
 +endif ()
  target_link_options(${EXE_NAME} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
  
@@ -541,11 +541,11 @@ index dde5fa3..a724f73 100644
  set (EXE_NAME2 "traccc_stdpar_fastsv_example")
  target_compile_options(${EXE_NAME2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${EXE_NAME2} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --stdpar-thrust-path=/opt/rocm/include --stdpar-prim-path=/opt/rocm/include --offload-arch=${TRACCC_STDPAR_TARGET})
++    target_compile_options(${EXE_NAME2} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
 +endif ()
  target_link_options(${EXE_NAME2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 diff --git a/tests/stdpar/CMakeLists.txt b/tests/stdpar/CMakeLists.txt
-index 166852c..43b99a6 100644
+index 166852c..697114c 100644
 --- a/tests/stdpar/CMakeLists.txt
 +++ b/tests/stdpar/CMakeLists.txt
 @@ -15,9 +15,14 @@ traccc_add_test( stdpar_sparseccl "test_cca_sparseccl.cpp"
@@ -553,14 +553,14 @@ index 166852c..43b99a6 100644
  set (LIB "traccc_test_stdpar_fastsv")
  target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${LIB} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --stdpar-thrust-path=/opt/rocm/include --stdpar-prim-path=/opt/rocm/include --offload-arch=${TRACCC_STDPAR_TARGET})
++    target_compile_options(${LIB} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
 +endif ()
  target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
  
  set (LIB2 "traccc_test_stdpar_sparseccl")
  target_compile_options(${LIB2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${LIB2} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --stdpar-thrust-path=/opt/rocm/include --stdpar-prim-path=/opt/rocm/include --offload-arch=${TRACCC_STDPAR_TARGET})
++    target_compile_options(${LIB2} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
 +endif ()
  target_link_options(${LIB2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 -                  
