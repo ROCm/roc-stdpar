@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index bbbae42..05ba7a7 100644
+index bbbae42..785adb9 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -8,10 +8,28 @@ set_target_properties(cuda_stdpar PROPERTIES CXX_STANDARD 20
+@@ -8,10 +8,33 @@ set_target_properties(cuda_stdpar PROPERTIES CXX_STANDARD 20
                                               CXX_STANDARD_REQUIRED ON
                                               CXX_EXTENSIONS OFF)
  
@@ -26,6 +26,11 @@ index bbbae42..05ba7a7 100644
 +target_compile_options(cuda_stdpar PRIVATE
 +    $<$<CXX_COMPILER_ID:Clang>: -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -Wextra $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>: -ffast-math -O3>>
 +)
++if (NOT STDPAR_TARGET MATCHES "^gfx9")
++    target_compile_options(cuda_stdpar PRIVATE
++        $<$<CXX_COMPILER_ID:Clang>: --stdpar-interpose-alloc>
++    )
++endif ()
 +
 +target_link_options(cuda_stdpar PRIVATE
      $<$<CXX_COMPILER_ID:NVHPC>: -stdpar=gpu>

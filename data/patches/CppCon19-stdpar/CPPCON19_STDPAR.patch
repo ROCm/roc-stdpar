@@ -1,9 +1,9 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 new file mode 100644
-index 0000000..006e678
+index 0000000..24f69c8
 --- /dev/null
 +++ b/CMakeLists.txt
-@@ -0,0 +1,41 @@
+@@ -0,0 +1,44 @@
 +cmake_minimum_required(VERSION 3.14)
 +
 +project(cppcon19-stdpar LANGUAGES CXX)
@@ -26,6 +26,9 @@ index 0000000..006e678
 +    -stdpar
 +    --stdpar-path=${STDPAR_PATH}
 +    --offload-arch=${STDPAR_TARGET})
++if (NOT STDPAR_TARGET MATCHES "^gfx9")
++    list(APPEND OFFLOAD_COMPILE_FLAGS --stdpar-interpose-alloc)
++endif ()
 +set(OFFLOAD_LINK_FLAGS -stdpar)
 +set(OFFLOAD_LINK_LIBRARIES TBB::tbb)
 +
