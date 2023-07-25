@@ -1,0 +1,63 @@
+diff --git a/heatEquation/Makefile b/heatEquation/Makefile
+index e6b4387..9d72699 100644
+--- a/heatEquation/Makefile
++++ b/heatEquation/Makefile
+@@ -1,11 +1,14 @@
+-default: nompi_gpu mpi_gpu
++default: nompi_nv mpi_nv
+ 
+ nompi_cpu: heatEquation.cpp
+ 	g++ --std=c++17 -O3 -fopenmp -o heatEquation heatEquation.cpp -ltbb
+ 
+-nompi_gpu: heatEquation.cpp
++nompi_nv: heatEquation.cpp
+ 	nvc++ --std=c++17 -stdpar -O3 -fopenmp -o heatEquation heatEquation.cpp
+ 
++nompi_clang: heatEquation.cpp
++	${STDPAR_CXX} --std=c++17 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -O3 -fopenmp -o heatEquation heatEquation.cpp
++
+ # This assumes that mpicxx is a wrapper for g++, clang, or another CPU compiler.
+ # You need to install Intel Threading Building Blocks ("apt install libtbb-dev")
+ mpi_cpu: heatEquation_mpi.cpp
+@@ -13,7 +16,7 @@ mpi_cpu: heatEquation_mpi.cpp
+ 
+ # This assumes that mpicxx is a wrapper for nvc++. It is likely located somewhere like
+ # /opt/nvidia/hpc_sdk/Linux_x86_64/VERSION/comm_libs/mpi/bin/mpicxx
+-mpi_gpu: heatEquation_mpi.cpp
++mpi_nv: heatEquation_mpi.cpp
+ 	mpicxx --std=c++17 -stdpar -O3 -DUSE_NVIDIA_HPC_SDK -o heatEquation_mpi heatEquation_mpi.cpp
+ 
+ clean:
+diff --git a/heatEquation/heatEquation.cpp b/heatEquation/heatEquation.cpp
+index 5749fca..dbc312e 100644
+--- a/heatEquation/heatEquation.cpp
++++ b/heatEquation/heatEquation.cpp
+@@ -38,7 +38,9 @@
+ #include <fstream>
+ #include <chrono>
+ #include <cmath>
+-#include <omp.h>
++#if __has_include(<omp.h>)
++    #include <omp.h>
++#endif
+ 
+ using namespace std;
+ using namespace std::chrono;
+@@ -108,7 +110,7 @@ double iterate_openmp_column(double* u_ptr, double* utmp_ptr, double Dconst) {
+ double iterate_lambda(double* u_ptr, double* utmp_ptr, double Dconst) {
+     return
+     transform_reduce (
+-        execution::par,
++        execution::par_unseq,
+         u_ptr, u_ptr + N*N, utmp_ptr,
+         0., plus<double>(),
+         [u_ptr, Dconst](double const& u_from, double& u_to) {
+@@ -276,7 +278,7 @@ int main(int argc, char* argv[]) {
+         if (image_frequency != -1 && num_iter % image_frequency == 0) {
+             write_to_bmp(N, u_ptr, num_image++, -1., 1.);
+         }
+-    } 
++    }
+ 
+     return 0;
+ }

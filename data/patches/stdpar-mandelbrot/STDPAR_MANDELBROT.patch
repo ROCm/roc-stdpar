@@ -1,0 +1,49 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 94be7ee..37c9574 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -34,6 +34,20 @@ set(NVHPC_OFFLOAD_GPU "OFF"
+ set(NVHPC_OFFLOAD_CPU OFF
+         CACHE BOOL
+         "Enable PSTL multicore support (via the non-standard `-stdpar`) for the NVHPC SDK.")
++set(CLANG_OFFLOAD_GPU OFF
++        CACHE STRING
++        "Enable offloading support (via the non-standard `-stdpar`) for Clang/LLVM.
++         The values are AMDGPU processors (https://www.llvm.org/docs/AMDGPUUsage.html#processors)
++         which will be passed in via `--offload-arch=` argument.
++         Example values are:
++           gfx906  - Compile for Vega20 GPUs
++           gfx908  - Compile for CDNA1 GPUs
++           gfx90a  - Compile for CDNA2 GPUs
++           gfx1030 - Compile for RDNA2 NV21 GPUs
++           gfx1100 - Compile for RDNA3 NV31 GPUs")
++set(CLANG_OFFLOAD_CPU OFF
++        CACHE BOOL
++        "Provided for symmetry with NVHPC, PSTL multicore is enabled by default")
+ set(USE_TBB OFF
+         CACHE BOOL
+         "Link against an in-tree oneTBB via FetchContent_Declare")
+@@ -109,6 +123,23 @@ else ()
+     target_link_options(stdpar-mandelbrot PRIVATE ${FLAGS})
+ endif ()
+ 
++if (CLANG_OFFLOAD_GPU AND CLANG_OFFLOAD_CPU)
++    message(FATAL_ERROR "CLANG_OFFLOAD_GPU and CLANG_OFFLOAD_CPU are mutually exclusive.")
++else ()
++    if (CLANG_OFFLOAD_GPU)
++        set(FLAGS -stdpar --stdpar-path=${CLANG_STDPAR_PATH} --offload-arch=${CLANG_OFFLOAD_GPU})
++        if (NOT CLANG_OFFLOAD MATCHES "^gfx9")
++            list(APPEND CLANG_FLAGS --stdpar-interpose-alloc)
++        endif ()
++        target_compile_options(stdpar-mandelbrot PRIVATE ${FLAGS})
++        target_link_options(stdpar-mandelbrot PRIVATE -stdpar)
++    elseif (CLANG_OFFLOAD_CPU)
++        set(FLAGS -ffast-math -Ofast -march=native)
++    else ()
++        set(FLAGS -Ofast -march=native)
++    endif ()
++endif ()
++
+ target_compile_definitions(stdpar-mandelbrot PRIVATE ${DEFS})
+ target_link_libraries(stdpar-mandelbrot PRIVATE ${LIBS})
+ 

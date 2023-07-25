@@ -1,0 +1,22 @@
+diff --git a/compile_local_clang_stdpar.sh b/compile_local_clang_stdpar.sh
+new file mode 100755
+index 0000000..6c94974
+--- /dev/null
++++ b/compile_local_clang_stdpar.sh
+@@ -0,0 +1,16 @@
++#!/bin/bash
++man="\
++Usage: compile_local_clang_stdpar \n\
++This will compile all .cpp files using Parallel STL offload via Clang / LLVM \n\
++"
++
++# -h message
++if [[ "$1" == "-h" || "$1" == "--help" ]]; then printf "$man"; exit; fi
++
++mkdir -p bin/
++
++# compile STL
++find **/*.cpp -exec sh -c '${STDPAR_CXX} -march=native -O3 -std=c++17 -Wl,-ltbb {} -o bin/$(basename {} .cpp)_cpu' \;
++
++# compile offloaded STL
++find **/*.cpp -exec sh -c '${STDPAR_CXX} -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -O3 -std=c++17 {} -o bin/$(basename {} .cpp)' \;

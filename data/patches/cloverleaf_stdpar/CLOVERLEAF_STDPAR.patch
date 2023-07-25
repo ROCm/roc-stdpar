@@ -1,0 +1,28 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a295ace..8e25a7c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -85,6 +85,23 @@ if (NVHPC_OFFLOAD)
+             -Minfo=stdpar)
+ endif ()
+ 
++# Enable offloading support (via the non-standard `-stdpar`) for Clang/LLVM. The
++# values are AMDGPU processors (https://www.llvm.org/docs/AMDGPUUsage.html#processors)
++# which will be passed in via `--offload-arch=` argument.
++# Example values are:
++#   gfx906  - Compile for Vega20 GPUs
++#   gfx908  - Compile for CDNA1 GPUs
++#   gfx90a  - Compile for CDNA2 GPUs
++#   gfx1030 - Compile for RDNA2 NV21 GPUs
++#   gfx1100 - Compile for RDNA3 NV31 GPUs
++
++if (CLANG_OFFLOAD)
++    set(OFFLOAD_FLAGS -stdpar --stdpar-path=${CLANG_STDPAR_PATH} --offload-arch=${CLANG_OFFLOAD})
++    if (NOT CLANG_OFFLOAD MATCHES "^gfx9")
++        list(APPEND CLANG_FLAGS --stdpar-interpose-alloc)
++    endif ()
++    list(APPEND CMAKE_CXX_EXTRA_LINKERFLAGS -stdpar)
++endif ()
+ 
+ if (MPI_AS_LIBRARY)
+ 

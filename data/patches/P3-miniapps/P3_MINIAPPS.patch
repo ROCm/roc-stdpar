@@ -1,0 +1,588 @@
+diff --git a/.gitignore b/.gitignore
+index 259148f..c971e39 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -30,3 +30,5 @@
+ *.exe
+ *.out
+ *.app
++.vscode
++build
+\ No newline at end of file
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index e691a7c..16461cb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -4,7 +4,7 @@ project(P3miniapps LANGUAGES CXX)
+ # Add cmake helpers
+ list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_SOURCE_DIR}/cmake")
+ 
+-# Find libraries 
++# Find libraries
+ find_package(mdspan CONFIG)
+ if(NOT mdspan_FOUND)
+     add_subdirectory(ext_lib/mdspan)
+@@ -21,6 +21,13 @@ if(PROGRAMMING_MODEL STREQUAL "KOKKOS")
+     endif()
+ endif()
+ 
++if(PROGRAMMING_MODEL STREQUAL "STDPAR")
++    if(BACKEND STREQUAL "CLANG")
++        set(CMAKE_CXX_STANDARD 17)
++        set(CMAKE_CXX_STANDARD_REQUIRED ON)
++    endif()
++endif()
++
+ add_subdirectory(lib)
+ 
+ include(CTest)
+diff --git a/lib/stdpar/CMakeLists.txt b/lib/stdpar/CMakeLists.txt
+index 0eecba7..c349f1c 100644
+--- a/lib/stdpar/CMakeLists.txt
++++ b/lib/stdpar/CMakeLists.txt
+@@ -12,8 +12,15 @@ elseif(BACKEND STREQUAL "OPENMP")
+     target_link_libraries(math_lib INTERFACE std::mdspan OpenMP::OpenMP_CXX fftw3)
+     target_compile_definitions(math_lib INTERFACE ENABLE_OPENMP ENABLE_STDPAR)
+     target_compile_options(math_lib INTERFACE -O3)
++elseif(BACKEND STREQUAL "CLANG")
++    find_package(rocblas REQUIRED)
++    find_package(rocfft REQUIRED)
++    target_link_libraries(math_lib INTERFACE std::mdspan roc::rocblas roc::rocfft)
++    target_compile_definitions(math_lib INTERFACE ENABLE_HIP ENABLE_STDPAR)
++    target_compile_options(math_lib INTERFACE -O3 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++    target_link_options(math_lib INTERFACE -stdpar)
+ else()
+-    message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
++    message(FATAL_ERROR "No parallel backend specified. One of CUDA, OPENMP or CLANG must be On.")
+ endif()
+ 
+ if(${CMAKE_CXX_COMPILER_ID} STREQUAL NVHPC)
+diff --git a/lib/stdpar/FFT.hpp b/lib/stdpar/FFT.hpp
+index a1a5d20..cda7c7f 100644
+--- a/lib/stdpar/FFT.hpp
++++ b/lib/stdpar/FFT.hpp
+@@ -3,6 +3,8 @@
+ 
+ #if defined( _NVHPC_STDPAR_GPU )
+   #include "../Cuda_FFT.hpp"
++#elif defined( __STDPAR__ )
++  #include "../HIP_FFT.hpp"
+ #else
+   #include "../OpenMP_FFT.hpp"
+ #endif
+diff --git a/lib/stdpar/Transpose.hpp b/lib/stdpar/Transpose.hpp
+index 70e6044..6935a47 100644
+--- a/lib/stdpar/Transpose.hpp
++++ b/lib/stdpar/Transpose.hpp
+@@ -3,6 +3,8 @@
+ 
+ #if defined( _NVHPC_STDPAR_GPU )
+   #include "../Cuda_Transpose.hpp"
++#elif defined( __STDPAR__ )
++  #include "../HIP_Transpose.hpp"
+ #else
+   #include "../OpenMP_Transpose.hpp"
+ #endif
+diff --git a/miniapps/CMakeLists.txt b/miniapps/CMakeLists.txt
+index 7314647..fb2b2d9 100644
+--- a/miniapps/CMakeLists.txt
++++ b/miniapps/CMakeLists.txt
+@@ -9,7 +9,7 @@ elseif(APPLICATION STREQUAL "vlp4d_mpi")
+ else()
+     # Default: all miniapps
+     add_subdirectory(heat3d)
+-    add_subdirectory(heat3d_mpi)
++    # add_subdirectory(heat3d_mpi)
+     add_subdirectory(vlp4d)
+-    add_subdirectory(vlp4d_mpi)
++    # add_subdirectory(vlp4d_mpi)
+ endif()
+diff --git a/miniapps/heat3d/stdpar/CMakeLists.txt b/miniapps/heat3d/stdpar/CMakeLists.txt
+index 1426bde..602afb1 100644
+--- a/miniapps/heat3d/stdpar/CMakeLists.txt
++++ b/miniapps/heat3d/stdpar/CMakeLists.txt
+@@ -15,8 +15,11 @@ if(BACKEND STREQUAL "CUDA")
+     target_link_options(heat3d PUBLIC -stdpar=gpu)
+ elseif(BACKEND STREQUAL "OPENMP")
+     target_compile_options(heat3d PUBLIC -stdpar=multicore)
++elseif(BACKEND STREQUAL "CLANG")
++    target_compile_options(heat3d PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++    target_link_options(heat3d PUBLIC -stdpar)
+ else()
+-    message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
++    message(FATAL_ERROR "No parallel backend specified. One of CUDA, OPENMP or CLANG must be On.")
+ endif()
+ 
+ # Macro
+diff --git a/miniapps/heat3d/stdpar/Init.hpp b/miniapps/heat3d/stdpar/Init.hpp
+index 84c74f2..e81b7f5 100644
+--- a/miniapps/heat3d/stdpar/Init.hpp
++++ b/miniapps/heat3d/stdpar/Init.hpp
+@@ -27,7 +27,7 @@ void initialize(Config &conf,
+   x = RealView1D("x", conf.nx);
+   y = RealView1D("y", conf.ny);
+   z = RealView1D("z", conf.nz);
+- 
++
+   u  = RealView3D("u",  conf.nx, conf.ny, conf.nz);
+   un = RealView3D("un", conf.nx, conf.ny, conf.nz);
+ 
+@@ -46,7 +46,7 @@ void initialize(Config &conf,
+         y(iy) = ytmp;
+         z(iz) = ztmp;
+         u(ix, iy, iz) = conf.umax
+-          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI); 
++          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI);
+       }
+     }
+   }
+@@ -71,7 +71,7 @@ void finalize(Config &conf, float64 time,
+   x.updateSelf();
+   y.updateSelf();
+   z.updateSelf();
+-  
++
+   for(int iz=0; iz<nz; iz++) {
+     for(int iy=0; iy<ny; iy++) {
+       for(int ix=0; ix<nx; ix++) {
+@@ -80,8 +80,8 @@ void finalize(Config &conf, float64 time,
+         const real_type ztmp = z(iz);
+ 
+         const real_type u_init = conf.umax
+-          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI); 
+-        
++          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI);
++
+         un(ix, iy, iz) = u_init * exp(-conf.Kappa * (pow((2.0 * M_PI / conf.Lx), 2) + pow((2.0 * M_PI / conf.Ly), 2) + pow((2.0 * M_PI / conf.Lz), 2) ) * time);
+       }
+     }
+@@ -116,6 +116,8 @@ void performance(Config &conf, double seconds) {
+     std::string backend = "CUDA";
+   #elif defined( ENABLE_OPENMP )
+     std::string backend = "OPENMP";
++  #elif defined( __STDPAR__ )
++    std::string backend = "CLANG";
+   #else
+     std::string backend = "OPENMP";
+   #endif
+diff --git a/miniapps/heat3d/stdpar/types.hpp b/miniapps/heat3d/stdpar/types.hpp
+index ae88da4..498060b 100644
+--- a/miniapps/heat3d/stdpar/types.hpp
++++ b/miniapps/heat3d/stdpar/types.hpp
+@@ -7,7 +7,7 @@
+ 
+ namespace stdex = std::experimental;
+ 
+-#if defined( _NVHPC_STDPAR_GPU )
++#if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
+   #define SIMD_LOOP
+   #define SIMD_WIDTH 1
+   using default_layout = stdex::layout_left;
+@@ -15,7 +15,7 @@ namespace stdex = std::experimental;
+ #else
+   using default_layout = stdex::layout_right;
+   using default_iterate_layout = stdex::layout_right;
+-  
++
+   #define SIMD_WIDTH 8
+   #include<omp.h>
+   #if defined(SIMD)
+diff --git a/miniapps/heat3d_mpi/stdpar/CMakeLists.txt b/miniapps/heat3d_mpi/stdpar/CMakeLists.txt
+index 1495637..7df0f63 100644
+--- a/miniapps/heat3d_mpi/stdpar/CMakeLists.txt
++++ b/miniapps/heat3d_mpi/stdpar/CMakeLists.txt
+@@ -18,8 +18,11 @@ if(BACKEND STREQUAL "CUDA")
+     target_link_options(heat3d_mpi PUBLIC -stdpar=gpu)
+ elseif(BACKEND STREQUAL "OPENMP")
+     target_compile_options(heat3d_mpi PUBLIC -stdpar=multicore)
++elseif(BACKEND STREQUAL "CLANG")
++    target_compile_options(heat3d_mpi PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offloar-arch=${STDPAR_TARGET})
++    target_link_options(heat3d_mpi PUBLIC -stdpar)
+ else()
+-    message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
++    message(FATAL_ERROR "No parallel backend specified. One of CUDA, OPENMP or CLANG must be On.")
+ endif()
+ 
+ # Macro
+diff --git a/miniapps/heat3d_mpi/stdpar/Init.hpp b/miniapps/heat3d_mpi/stdpar/Init.hpp
+index f51beda..1efcb50 100644
+--- a/miniapps/heat3d_mpi/stdpar/Init.hpp
++++ b/miniapps/heat3d_mpi/stdpar/Init.hpp
+@@ -45,7 +45,7 @@ void testComm(Config &conf, Comm &comm, RealView3D &u, RealView3D &un) {
+ 
+   auto print_error = [&](int ix, int iy, int iz, int gix, int giy, int giz) {
+     auto diff = un(ix, iy, iz) - u(ix, iy, iz);
+-    if (fabs(diff) > .1) { 
++    if (fabs(diff) > .1) {
+       printf("Pb at rank %d (%d, %d, %d) u(%d, %d, %d): %lf, un(%d, %d, %d): %lf, error: %lf\n",
+              comm.rank(), cart_rank.at(0), cart_rank.at(1), cart_rank.at(2), ix, iy, iz, u(ix, iy, iz), gix, giy, giz, un(ix, iy, iz), diff);
+     }
+@@ -104,7 +104,7 @@ void initialize(Config &conf, Comm &comm,
+   x = RealView1D("x", conf.nx);
+   y = RealView1D("y", conf.ny);
+   z = RealView1D("z", conf.nz);
+- 
++
+   const size_t nx_halo = conf.nx+2;
+   const size_t ny_halo = conf.ny+2;
+   const size_t nz_halo = conf.nz+2;
+@@ -137,7 +137,7 @@ void initialize(Config &conf, Comm &comm,
+         y(iy) = ytmp;
+         z(iz) = ztmp;
+         u(ix, iy, iz) = conf.umax
+-          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI); 
++          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI);
+       }
+     }
+   }
+@@ -155,7 +155,7 @@ void finalize(Config &conf, Comm &comm, float64 time,
+   const int nx = conf.nx;
+   const int ny = conf.ny;
+   const int nz = conf.nz;
+-  
++
+   auto topology  = comm.topology();
+   for(int iz=0; iz<nz; iz++) {
+     for(int iy=0; iy<ny; iy++) {
+@@ -165,8 +165,8 @@ void finalize(Config &conf, Comm &comm, float64 time,
+         const real_type ztmp = z(iz);
+ 
+         const real_type u_init = conf.umax
+-          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI); 
+-        
++          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI);
++
+         un(ix, iy, iz) = u_init * exp(-conf.Kappa * (pow((2.0 * M_PI / conf.Lx), 2) + pow((2.0 * M_PI / conf.Ly), 2) + pow((2.0 * M_PI / conf.Lz), 2) ) * time);
+       }
+     }
+@@ -201,7 +201,7 @@ void performance(Config &conf, Comm &comm, double seconds) {
+   double GFlops = static_cast<double>(n) * size * static_cast<double>(conf.nbiter) * 9 / 1.e9;
+ 
+   std::string backend = "STDPAR";
+-  #if defined( _NVHPC_STDPAR_GPU )
++  #if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
+     std::string arch = "GPU";
+   #else
+     std::string arch = "CPU";
+diff --git a/miniapps/heat3d_mpi/stdpar/Types.hpp b/miniapps/heat3d_mpi/stdpar/Types.hpp
+index 249876d..6c878fe 100644
+--- a/miniapps/heat3d_mpi/stdpar/Types.hpp
++++ b/miniapps/heat3d_mpi/stdpar/Types.hpp
+@@ -7,7 +7,7 @@
+ 
+ namespace stdex = std::experimental;
+ 
+-#if defined( _NVHPC_STDPAR_GPU )
++#if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
+   #define SIMD_LOOP
+   #define SIMD_WIDTH 1
+   using default_layout = stdex::layout_left;
+@@ -15,7 +15,7 @@ namespace stdex = std::experimental;
+ #else
+   using default_layout = stdex::layout_right;
+   using default_iterate_layout = stdex::layout_right;
+-  
++
+   #define SIMD_WIDTH 8
+   #include<omp.h>
+   #if defined(SIMD)
+diff --git a/miniapps/vlp4d/stdpar/CMakeLists.txt b/miniapps/vlp4d/stdpar/CMakeLists.txt
+index ca5d616..4529b24 100644
+--- a/miniapps/vlp4d/stdpar/CMakeLists.txt
++++ b/miniapps/vlp4d/stdpar/CMakeLists.txt
+@@ -8,6 +8,11 @@ set(BACKEND AUTO CACHE STRING "CHOICE OF PARALLEL BACKEND")
+ if(BACKEND STREQUAL "CUDA")
+     target_compile_options(vlp4d PUBLIC -O3 -stdpar=gpu)
+     target_link_options(vlp4d PUBLIC -stdpar=gpu -cudalib=cufft)
++elseif(BACKEND STREQUAL "CLANG")
++    find_package(rocfft REQUIRED)
++    target_compile_options(vlp4d PUBLIC -O3 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} --stdpar-interpose-alloc)
++    target_link_options(vlp4d PUBLIC -stdpar)
++    target_link_libraries(vlp4d PUBLIC roc::rocfft)
+ else()
+     target_compile_options(vlp4d PUBLIC -O3 -stdpar=multicore -mp)
+     target_compile_definitions(vlp4d PUBLIC SIMD)
+diff --git a/miniapps/vlp4d/stdpar/diags.hpp b/miniapps/vlp4d/stdpar/diags.hpp
+index 8be727a..b38c67c 100644
+--- a/miniapps/vlp4d/stdpar/diags.hpp
++++ b/miniapps/vlp4d/stdpar/diags.hpp
+@@ -13,6 +13,9 @@ private:
+ 
+ public:
+   Diags(Config *conf);
++  #if defined(__STDPAR__)
++    Diags(const Diags&) = delete;
++  #endif
+   virtual ~Diags();
+ 
+   void compute(Config *conf, Efield *ef, int iter);
+diff --git a/miniapps/vlp4d/stdpar/efield.hpp b/miniapps/vlp4d/stdpar/efield.hpp
+index 590f138..8a06350 100644
+--- a/miniapps/vlp4d/stdpar/efield.hpp
++++ b/miniapps/vlp4d/stdpar/efield.hpp
+@@ -26,6 +26,9 @@ private:
+ 
+ public:
+   Efield(Config *conf, shape_nd<2> dim);
++  #if defined(__STDPAR__)
++    Efield(const Efield&) = delete;
++  #endif
+   virtual ~Efield();
+ 
+   void solve_poisson_fftw(double xmax, double ymax);
+diff --git a/miniapps/vlp4d/stdpar/types.hpp b/miniapps/vlp4d/stdpar/types.hpp
+index 1b29915..2b80c7f 100644
+--- a/miniapps/vlp4d/stdpar/types.hpp
++++ b/miniapps/vlp4d/stdpar/types.hpp
+@@ -9,7 +9,7 @@
+ 
+ namespace stdex = std::experimental;
+ 
+-#if defined( _NVHPC_STDPAR_GPU )
++#if defined( _NVHPC_STDPAR_GPU ) || defined(__STDPAR__)
+   #define SIMD_LOOP
+   #define SIMD_WIDTH 1
+   using default_layout = stdex::layout_left;
+@@ -45,13 +45,13 @@ using size_type = uint64_t; // uint32_t
+ template <size_t ND>
+ using shape_nd = std::array<int, ND>;
+ 
+-template < typename ScalarType > 
++template < typename ScalarType >
+ using View1D = View<ScalarType, stdex::dextents< size_type, 1 >, default_layout >;
+-template < typename ScalarType > 
++template < typename ScalarType >
+ using View2D = View<ScalarType, stdex::dextents< size_type, 2 >, default_layout >;
+-template < typename ScalarType > 
++template < typename ScalarType >
+ using View3D = View<ScalarType, stdex::dextents< size_type, 3 >, default_layout >;
+-template < typename ScalarType > 
++template < typename ScalarType >
+ using View4D = View<ScalarType, stdex::dextents< size_type, 4 >, default_layout >;
+ 
+ using RealView1D = View1D<Real>;
+diff --git a/miniapps/vlp4d_mpi/stdpar/Spline.hpp b/miniapps/vlp4d_mpi/stdpar/Spline.hpp
+index 308eedc..716d773 100644
+--- a/miniapps/vlp4d_mpi/stdpar/Spline.hpp
++++ b/miniapps/vlp4d_mpi/stdpar/Spline.hpp
+@@ -20,7 +20,7 @@ public:
+   Spline(Config *conf) {
+     Domain *dom = &(conf->dom_);
+ 
+-    nx_min_  = dom->local_nxmin_[0] - HALO_PTS; 
++    nx_min_  = dom->local_nxmin_[0] - HALO_PTS;
+     ny_min_  = dom->local_nxmin_[1] - HALO_PTS;
+     nvx_min_ = dom->local_nxmin_[2] - HALO_PTS;
+     nvy_min_ = dom->local_nxmin_[3] - HALO_PTS;
+@@ -57,7 +57,7 @@ public:
+     using layout_type = RealView4D::layout_type;
+ 
+     if(std::is_same_v<layout_type, stdex::layout_left>) {
+-      #if defined( _NVHPC_STDPAR_GPU )
++      #if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
+         transpose_->forward(fn.data(), fn_trans_.data());
+         computeCoeffCore_parallel_xy(fn_trans_, fn_trans_tmp_);
+         transpose_->backward(fn_trans_.data(), fn.data());
+@@ -65,7 +65,7 @@ public:
+         computeCoeffCore_parallel_vxvy(fn, fn_tmp_);
+       #endif
+     } else {
+-      #if defined( _NVHPC_STDPAR_GPU )
++      #if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
+         computeCoeffCore_parallel_vxvy(fn, fn_tmp_);
+       #else
+         transpose_->forward(fn.data(), fn_trans_.data());
+@@ -78,7 +78,7 @@ public:
+   void computeCoeff_vxvy(RealView4D &fn) {
+     using layout_type = RealView4D::layout_type;
+     if(std::is_same_v<layout_type, stdex::layout_left>) {
+-      #if defined( _NVHPC_STDPAR_GPU )
++      #if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
+         computeCoeffCore_parallel_xy(fn, fn_tmp_);
+       #else
+         transpose_->forward(fn.data(), fn_trans_.data());
+@@ -86,7 +86,7 @@ public:
+         transpose_->backward(fn_trans_.data(), fn.data());
+       #endif
+     } else {
+-      #if defined( _NVHPC_STDPAR_GPU )
++      #if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
+         transpose_->forward(fn.data(), fn_trans_.data());
+         computeCoeffCore_parallel_vxvy(fn_trans_, fn_tmp_);
+         transpose_->backward(fn_trans_.data(), fn.data());
+@@ -230,7 +230,7 @@ private:
+             _fn_tmp(i0start+nn, i1, i2, i3) = _fn(i0start + nn, i1, i2, i3) + alpha * _fn_tmp(i0start + nn - 1, i1, i2, i3);
+           }
+         #endif
+-         
++
+         // fn[iend+1] stores the precomputed right sum
+         float64 fnend = _fn(i0end+1, i1, i2, i3) + _fn(i0end, i1, i2, i3);
+         float64 alpha_k = alpha;
+@@ -238,7 +238,7 @@ private:
+           fnend += _fn(i0end - nn, i1, i2, i3) * alpha_k; //STDALGO
+           alpha_k *= alpha;
+         }
+-        
++
+         _fn(i0end, i1, i2, i3) = fnend * sqrt3;
+         #if defined( LONG_ENOUGH_BUFFER )
+           for(int nn = i0end - 1; nn >= i0start; nn--) {
+@@ -265,7 +265,7 @@ private:
+             _fn_tmp(i0, i1start + nn, i2, i3) = _fn(i0, i1start + nn, i2, i3) + alpha * _fn_tmp(i0, i1start + nn - 1, i2, i3);
+           }
+         #endif
+-         
++
+         // fn[iend+1] stores the precomputed right sum
+         float64 fnend = _fn(i0, i1end+1, i2, i3) + _fn(i0, i1end, i2, i3);
+         float64 alpha_k = alpha;
+@@ -273,7 +273,7 @@ private:
+           fnend += _fn(i0, i1end - nn, i2, i3) * alpha_k; //STDALGO
+           alpha_k *= alpha;
+         }
+-         
++
+         _fn(i0, i1end, i2, i3) = fnend * sqrt3;
+         #if defined( LONG_ENOUGH_BUFFER )
+           for(int nn = i1end - 1; nn >= i1start; nn--) {
+diff --git a/miniapps/vlp4d_mpi/stdpar/Types.hpp b/miniapps/vlp4d_mpi/stdpar/Types.hpp
+index ea3a952..bba69b9 100644
+--- a/miniapps/vlp4d_mpi/stdpar/Types.hpp
++++ b/miniapps/vlp4d_mpi/stdpar/Types.hpp
+@@ -9,7 +9,7 @@
+ 
+ namespace stdex = std::experimental;
+ 
+-#if defined( _NVHPC_STDPAR_GPU )
++#if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
+   #define SIMD_LOOP
+   #define SIMD_WIDTH 1
+   using default_layout = stdex::layout_left;
+@@ -57,13 +57,13 @@ using size_type = uint64; // Not working with uint32
+ template <size_t ND>
+ using shape_nd = std::array<int, ND>;
+ 
+-template < typename ScalarType > 
++template < typename ScalarType >
+ using View1D = View<ScalarType, stdex::dextents< size_type, 1 >, default_layout >;
+-template < typename ScalarType > 
++template < typename ScalarType >
+ using View2D = View<ScalarType, stdex::dextents< size_type, 2 >, default_layout >;
+-template < typename ScalarType > 
++template < typename ScalarType >
+ using View3D = View<ScalarType, stdex::dextents< size_type, 3 >, default_layout >;
+-template < typename ScalarType > 
++template < typename ScalarType >
+ using View4D = View<ScalarType, stdex::dextents< size_type, 4 >, default_layout >;
+ 
+ using RealView1D = View1D<Real>;
+diff --git a/tests/stdpar/CMakeLists.txt b/tests/stdpar/CMakeLists.txt
+index 1429cb8..01dec5e 100644
+--- a/tests/stdpar/CMakeLists.txt
++++ b/tests/stdpar/CMakeLists.txt
+@@ -11,6 +11,12 @@ if(BACKEND STREQUAL "CUDA")
+     target_link_options(google_tests PUBLIC -stdpar=gpu -cudalib=cufft,cublas)
+ elseif(BACKEND STREQUAL "OPENMP")
+     target_compile_options(google_tests PUBLIC -O3 -stdpar=multicore -mp)
++elseif(BACKEND STREQUAL "CLANG")
++    find_package(rocblas REQUIRED)
++    find_package(rocfft REQUIRED)
++    target_compile_options(google_tests PUBLIC -O3 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++    target_link_libraries(google_tests PUBLIC roc::rocblas roc::rocfft)
++    target_link_options(google_tests PUBLIC -stdpar)
+ else()
+     message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
+ endif()
+diff --git a/tests/stdpar/test_view.cpp b/tests/stdpar/test_view.cpp
+index b5935a5..482b147 100644
+--- a/tests/stdpar/test_view.cpp
++++ b/tests/stdpar/test_view.cpp
+@@ -28,35 +28,37 @@ void set_inside_function(RealView2D shallow_copy_to_a_View) {
+     });
+ }
+ 
+-void test_copy_constructor() {
+-  RealView2D simple("simple", 16, 16);
+-  RealView2D reference("reference", 16, 16);
+-
+-  set_inside_function(simple);
+-
+-  // Set in the main function
+-  const int n = reference.extent(0);
+-  const int m = reference.extent(1);
+-
+-  Iterate_policy<2> policy2d({0, 0}, {n, m});
+-
+-  auto _reference = reference.mdspan();
+-  Impl::for_each(policy2d,
+-    [=] (const int i, const int j){
+-      _reference(i, j) = i + j * 0.2 + 0.01;
+-    });
+-
+-  simple.updateSelf();
+-  reference.updateSelf();
+-
+-  // Check if the host data are identical
+-  for(int j=0; j<m; j++) {
+-    for(int i=0; i<n; i++) {
+-      ASSERT_EQ( simple(i, j), reference(i, j) );
+-      ASSERT_NE( simple(i, j), 0.0 ); // Just to make sure simple has some value
++#if !defined(__STDPAR__)
++  void test_copy_constructor() {
++    RealView2D simple("simple", 16, 16);
++    RealView2D reference("reference", 16, 16);
++
++    set_inside_function(simple);
++
++    // Set in the main function
++    const int n = reference.extent(0);
++    const int m = reference.extent(1);
++
++    Iterate_policy<2> policy2d({0, 0}, {n, m});
++
++    auto _reference = reference.mdspan();
++    Impl::for_each(policy2d,
++      [=] (const int i, const int j){
++        _reference(i, j) = i + j * 0.2 + 0.01;
++      });
++
++    simple.updateSelf();
++    reference.updateSelf();
++
++    // Check if the host data are identical
++    for(int j=0; j<m; j++) {
++      for(int i=0; i<n; i++) {
++        ASSERT_EQ( simple(i, j), reference(i, j) );
++        ASSERT_NE( simple(i, j), 0.0 ); // Just to make sure simple has some value
++      }
+     }
+   }
+-}
++#endif
+ 
+ void test_assignment_operator() {
+   // [NOTE] Do not recommend to use assignement opertor
+@@ -229,16 +231,18 @@ void test_swap() {
+ }
+ 
+ TEST( VIEW, DEFAULT_CONSTRUCTOR ) {
+-  RealView2D empty; 
++  RealView2D empty;
+   RealView2D simple("simple", std::array<size_type, 2>{2, 3}); // Simple constructor
+   RealView2D Kokkos_like("kokkos_like", 2, 3); // Kokkos like constructor
+   RealView2D offset_view("offset_view", std::array<size_type, 2>{3, 4}, std::array<int, 2>{-1, -1}); // Offset view
+   RealView2D offset_view_int("offset_view", std::array<int, 2>{3, 4}, std::array<int, 2>{-1, -1}); // Offset view
+ }
+ 
+-TEST( VIEW, COPY_CONSTRUCTOR ) {
+-  test_copy_constructor();
+-}
++#if !defined(__STDPAR__)
++  TEST( VIEW, COPY_CONSTRUCTOR ) {
++    test_copy_constructor();
++  }
++#endif
+ 
+ TEST( VIEW, ASSIGN ) {
+   test_assignment_operator();

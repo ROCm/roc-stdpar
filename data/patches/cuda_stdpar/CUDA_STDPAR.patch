@@ -1,0 +1,48 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index bbbae42..05ba7a7 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -8,10 +8,28 @@ set_target_properties(cuda_stdpar PROPERTIES CXX_STANDARD 20
+                                              CXX_STANDARD_REQUIRED ON
+                                              CXX_EXTENSIONS OFF)
+ 
+-target_compile_options(cuda_stdpar PRIVATE 
++target_compile_options(cuda_stdpar PRIVATE
+     $<$<CXX_COMPILER_ID:NVHPC>: -stdpar=gpu -Wextra $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>: -gpu=fastmath -O3>>
+ )
+ 
+-target_link_options(cuda_stdpar PRIVATE 
++if (CMAKE_CXX_COMPILER_ID MATCHES Clang)
++    if (NOT DEFINED STDPAR_PATH)
++        message(
++            WARNING "The path to the forwarding header has not been specified.")
++    endif ()
++
++    if (NOT DEFINED STDPAR_TARGET)
++        message(
++            WARNING "An offload target has not been specified, using gfx906.")
++    endif ()
++endif ()
++target_compile_options(cuda_stdpar PRIVATE
++    $<$<CXX_COMPILER_ID:Clang>: -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -Wextra $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>: -ffast-math -O3>>
++)
++
++target_link_options(cuda_stdpar PRIVATE
+     $<$<CXX_COMPILER_ID:NVHPC>: -stdpar=gpu>
+ )
++target_link_options(cuda_stdpar PRIVATE
++    $<$<CXX_COMPILER_ID:Clang>: -stdpar>
++)
+diff --git a/main.cpp b/main.cpp
+index 8298f27..fa83d70 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -131,7 +131,7 @@ namespace
+         const std::span data_y{data.y};
+         const std::span data_z{data.z};
+ 
+-        const auto v = std::views::iota(0, std::int32_t{n});
++        const auto v = std::views::iota(0, std::int32_t(n));
+         reduced = std::transform_reduce(std::execution::par_unseq, std::begin(v), std::end(v), qf::point3d{},
+                                         std::plus<>{}, [=](const auto i) {
+                                           const auto x = data_x[i];

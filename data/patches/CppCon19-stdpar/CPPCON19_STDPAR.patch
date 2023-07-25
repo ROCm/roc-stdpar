@@ -1,0 +1,147 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+new file mode 100644
+index 0000000..006e678
+--- /dev/null
++++ b/CMakeLists.txt
+@@ -0,0 +1,41 @@
++cmake_minimum_required(VERSION 3.14)
++
++project(cppcon19-stdpar LANGUAGES CXX)
++
++set(CMAKE_CXX_STANDARD 17)
++set(CMAKE_CXX_STANDARD_REQUIRED ON)
++set(CMAKE_CXX_EXTENSIONS OFF)
++
++find_package(TBB REQUIRED)
++
++if (NOT DEFINED STDPAR_PATH)
++    message(WARNING "The path to the forwarding header has not been specified.")
++endif ()
++
++if (NOT DEFINED STDPAR_TARGET)
++    message(WARNING "An offload target has not been specified, using gfx906.")
++endif ()
++
++set(OFFLOAD_COMPILE_FLAGS
++    -stdpar
++    --stdpar-path=${STDPAR_PATH}
++    --offload-arch=${STDPAR_TARGET})
++set(OFFLOAD_LINK_FLAGS -stdpar)
++set(OFFLOAD_LINK_LIBRARIES TBB::tbb)
++
++add_executable(
++    jacobi_stdpar1 ${CMAKE_CURRENT_SOURCE_DIR}/jacobi/stdpar1/jacobi.cpp)
++target_compile_options(jacobi_stdpar1 PRIVATE ${OFFLOAD_COMPILE_FLAGS})
++target_link_options(jacobi_stdpar1 PRIVATE ${OFFLOAD_LINK_FLAGS})
++target_link_libraries(jacobi_stdpar1 PRIVATE ${OFFLOAD_LINK_LIBRARIES})
++
++add_executable(
++    jacobi_stdpar2 ${CMAKE_CURRENT_SOURCE_DIR}/jacobi/stdpar2/jacobi.cpp)
++target_compile_options(jacobi_stdpar2 PRIVATE ${OFFLOAD_COMPILE_FLAGS})
++target_link_options(jacobi_stdpar2 PRIVATE ${OFFLOAD_LINK_FLAGS})
++target_link_libraries(jacobi_stdpar2 PRIVATE ${OFFLOAD_LINK_LIBRARIES})
++
++add_executable(travel ${CMAKE_CURRENT_SOURCE_DIR}/travel/stdpar/travel.cpp)
++target_compile_options(travel PRIVATE ${OFFLOAD_COMPILE_FLAGS})
++target_link_options(travel PRIVATE ${OFFLOAD_LINK_FLAGS})
++target_link_libraries(travel PRIVATE ${OFFLOAD_LINK_LIBRARIES})
+\ No newline at end of file
+diff --git a/jacobi/stdpar1/jacobi.cpp b/jacobi/stdpar1/jacobi.cpp
+index e6861f6..42eb525 100644
+--- a/jacobi/stdpar1/jacobi.cpp
++++ b/jacobi/stdpar1/jacobi.cpp
+@@ -84,14 +84,14 @@ struct indexer2d {
+ 
+ int jacobi_solver(float* data, int M, int N, float max_diff) {
+   float* temp = new float[M * N];
+-  std::copy(std::execution::par, data, data + M*N, temp);
++  std::copy(std::execution::par_unseq, data, data + M*N, temp);
+   int iterations = 0;
+   bool keep_going;
+   float* from = data;
+   float* to = temp;
+   do {
+     ++iterations;
+-    keep_going = std::transform_reduce(std::execution::par,
++    keep_going = std::transform_reduce(std::execution::par_unseq,
+         counting_iterator<int>(N+1), counting_iterator<int>(((M-1)*N)-1),
+         false, std::logical_or<bool>(),
+         [=](int i) {
+@@ -104,7 +104,7 @@ int jacobi_solver(float* data, int M, int N, float max_diff) {
+     std::swap(from, to);
+   } while (keep_going);
+   if (to == data) {
+-    std::copy(std::execution::par, temp, temp + M*N, data);
++    std::copy(std::execution::par_unseq, temp, temp + M*N, data);
+   }
+   delete[] temp;
+   return iterations;
+diff --git a/jacobi/stdpar2/jacobi.cpp b/jacobi/stdpar2/jacobi.cpp
+index 4893224..91cbb1b 100644
+--- a/jacobi/stdpar2/jacobi.cpp
++++ b/jacobi/stdpar2/jacobi.cpp
+@@ -84,21 +84,21 @@ struct indexer2d {
+ 
+ int jacobi_solver(float* data, int M, int N, float max_diff) {
+   float* temp = new float[M * N];
+-  std::copy(std::execution::par, data, data + M*N, temp);
++  std::copy(std::execution::par_unseq, data, data + M*N, temp);
+   int iterations = 0;
+   bool keep_going;
+   float* from = data;
+   float* to = temp;
+   do {
+     ++iterations;
+-    std::for_each(std::execution::par,
++    std::for_each(std::execution::par_unseq,
+         counting_iterator<int>(N+1), counting_iterator<int>(((M-1)*N)-1),
+         [=](int i) {
+           if (i % N != 0 && i % N != N-1) {
+             to[i] = 0.25f * (from[i-N] + from[i+N] + from[i-1] + from[i+1]);
+           }
+         });
+-    keep_going = std::any_of(std::execution::par,
++    keep_going = std::any_of(std::execution::par_unseq,
+         counting_iterator<int>(N+1), counting_iterator<int>(((M-1)*N)-1),
+         [=](int i) {
+           return std::fabs(to[i] - from[i]) > max_diff;
+@@ -106,7 +106,7 @@ int jacobi_solver(float* data, int M, int N, float max_diff) {
+     std::swap(from, to);
+   } while (keep_going);
+   if (to == data) {
+-    std::copy(std::execution::par, temp, temp + M*N, data);
++    std::copy(std::execution::par_unseq, temp, temp + M*N, data);
+   }
+   delete[] temp;
+   return iterations;
+diff --git a/travel/stdpar/travel.cpp b/travel/stdpar/travel.cpp
+index f8945dc..761b08a 100644
+--- a/travel/stdpar/travel.cpp
++++ b/travel/stdpar/travel.cpp
+@@ -165,7 +165,7 @@ long factorial(long x) {
+ }
+ 
+ route_cost find_best_route(int const* distances, int N) {
+-  return std::transform_reduce(std::execution::par,
++  return std::transform_reduce(std::execution::par_unseq,
+       counting_iterator<long>(0L), counting_iterator<long>(factorial(N)),
+       route_cost(),
+       route_cost::min,
+@@ -202,7 +202,7 @@ int main(int argc, char **argv) {
+ 
+   find_best_route(distances, std::min(N, 5));
+ 
+-  std::cout << "Checking " << factorial(N) 
++  std::cout << "Checking " << factorial(N)
+             << " routes for the best way to visit " << N << " cities...\n";
+   auto start = std::chrono::steady_clock::now();
+ 
+@@ -211,7 +211,7 @@ int main(int argc, char **argv) {
+   auto end = std::chrono::steady_clock::now();
+   auto duration =
+     std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+-  std::cout << "Took " << (duration / 1000) << "." << std::setw(3) 
++  std::cout << "Took " << (duration / 1000) << "." << std::setw(3)
+             << std::setfill('0') << (duration % 1000) << "s\n";
+ 
+   print_route(best_route, N);
