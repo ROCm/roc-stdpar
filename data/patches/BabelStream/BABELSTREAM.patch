@@ -10,35 +10,8 @@ index 3035da0..6af2cb3 100644
  #include <limits>
  #include <chrono>
  #include <algorithm>
-@@ -93,7 +94,7 @@ int main(int argc, char *argv[])
-   if (use_float)
-     run<float>();
-   else
--    run<double>(); 
-+    run<double>();
- 
- }
- 
-@@ -284,7 +285,7 @@ void run()
- 
- #elif defined(THRUST)
-   // Use the Thrust implementation
--  stream = new ThrustStream<T>(ARRAY_SIZE, deviceIndex); 
-+  stream = new ThrustStream<T>(ARRAY_SIZE, deviceIndex);
- 
- #elif defined(ACC)
-   // Use the OpenACC implementation
-@@ -403,7 +404,7 @@ void run()
-       {
-         std::cout
-           << std::left << std::setw(12) << labels[i]
--          << std::left << std::setw(12) << std::setprecision(3) << 
-+          << std::left << std::setw(12) << std::setprecision(3) <<
-             ((mibibytes) ? pow(2.0, -20.0) : 1.0E-6) * sizes[i] / (*minmax.first)
-           << std::left << std::setw(12) << std::setprecision(5) << *minmax.first
-           << std::left << std::setw(12) << std::setprecision(5) << *minmax.second
 diff --git a/src/std-data/model.cmake b/src/std-data/model.cmake
-index ef69f30..f4a42c2 100644
+index ef69f30..cc341d2 100644
 --- a/src/std-data/model.cmake
 +++ b/src/std-data/model.cmake
 @@ -19,6 +19,19 @@ register_flag_optional(NVHPC_OFFLOAD
@@ -61,7 +34,7 @@ index ef69f30..f4a42c2 100644
  macro(setup)
      set(CMAKE_CXX_STANDARD 17)
  
-@@ -29,5 +42,14 @@ macro(setup)
+@@ -29,5 +42,16 @@ macro(setup)
          register_append_link_flags(${NVHPC_FLAGS})
      endif ()
  
@@ -74,6 +47,8 @@ index ef69f30..f4a42c2 100644
 +        register_append_cxx_flags(ANY ${CLANG_FLAGS})
 +        register_append_link_flags(-stdpar)
 +    endif ()
++
++    register_append_link_flags(-ltbb)
  
  endmacro()
 diff --git a/src/std-indices/model.cmake b/src/std-indices/model.cmake
