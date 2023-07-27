@@ -9,7 +9,8 @@ This repository contains:
    included by the compiler, and forwards various calls to the HIP and rocThrust
    libraries, its standalone uses are limited. For detailed documentation on
    ROCm GPU acceleration for Standard C++ Algorithms, please see the
-   [LLVM treatment of the topic](http://tbd.tbd.com);
+   [RFC](https://discourse.llvm.org/t/rfc-adding-c-parallel-algorithm-offload-support-to-clang-llvm/72159)
+   and [the patch set](https://reviews.llvm.org/D155769).
 2. A set of diffs, under the `/data` folder, which capture the changes needed to
    enable Standard Algorithm offload in LLVM (this is a pre-requisite), as well
    as in a number of client apps;
