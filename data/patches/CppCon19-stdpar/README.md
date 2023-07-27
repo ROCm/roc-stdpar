@@ -1,7 +1,7 @@
 # CppCon19-stdpar
 
 - url: <https://github.com/dkolsen-pgi/CppCon19-stdpar>
-- branch: `main`
+- branch: `main` at `71e4305907b2710def4ef88a036980a9e08529e2`
 - notes:
   - execution policies are switched from `par` to `par_unseq` to enable offload
   - a minimalist CMake based build infrastructure is added

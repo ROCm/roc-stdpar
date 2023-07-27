@@ -1,7 +1,7 @@
 # `traccc`
 
 - url: <https://github.com/ugGit/traccc>
-- branch: `main`
+- branch: `main` at `6c6572f16fcf7e8136db85059becdcd8a0fcb604`
 - notes:
   - only the algorithm embodied by `fast_sv_kernel` is currently offloaded
   - the 'Detray' component has a dependency on CUDA Thrust that it opaquely

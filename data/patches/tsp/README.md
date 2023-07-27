@@ -1,7 +1,7 @@
 # `tsp`
 
 - url: <https://github.com/pkestene/tsp>
-- branch: `master`
+- branch: `master` at `515872774fdeb5caf2ee13cbf1d64e3720e8995b`
 - notes:
   - execution policies are switched from `par` to `par_unseq` to enable offload
   - a `tsp_clang_stdpar_cpu` target is added to the Makefile

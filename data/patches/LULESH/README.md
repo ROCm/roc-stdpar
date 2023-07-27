@@ -1,7 +1,7 @@
 # LULESH
 
 - url: <https://github.com/LLNL/LULESH>
-- branch: `2.0.2-dev`
+- branch: `2.0.2-dev` at `46c0ffcc503c300ed3ef364103499958a5c4ee16`
 - notes:
   - execution policies are switched from `par` to `par_unseq` to enable offload
   - a Makefile named `Makefile-stdpar` is added

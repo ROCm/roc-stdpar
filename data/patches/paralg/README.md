@@ -1,7 +1,7 @@
 # `paralg`
 
 - url: <https://gitlab.com/unigehpfs/paralg>
-- branch: `master`
+- branch: `master` at `0450e72bd4081ce63a3fe4f42a3044709fa12b8c`
 - notes:
   - execution policies are switched from `par` to `par_unseq` to enable offload
   - a `nompi_clang` target is added to the Makefile

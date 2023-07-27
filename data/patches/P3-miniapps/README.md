@@ -1,7 +1,7 @@
 # P3-miniapps
 
 - url: <https://github.com/yasahi-hpc/P3-miniapps>
-- branch: `main`
+- branch: `main` at `c1b946b91b608929ac7306e95e01222f726cdb5d`
 - notes:
   - the value `CLANG` is added to the set of possible values for the `BACKEND`
     CMake variable, and it's used to select Clang/LLVM Standard Algorithm

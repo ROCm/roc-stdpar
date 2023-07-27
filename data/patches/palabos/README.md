@@ -1,7 +1,7 @@
 # Palabos
 
 - url: <https://gitlab.com/unigehpfs/palabos>
-- branch: `master`
+- branch: `master` at `13bc5ba4d03306367ef65983aceaf0185a535c91`
 - notes:
   - the three Standard Parallelism examples under `examples/80days` must be
     built individually, and are self-contained

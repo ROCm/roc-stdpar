@@ -1,7 +1,7 @@
 # `cloverleaf_stdpar`
 
 - url: <https://github.com/UoB-HPC/cloverleaf_stdpar>
-- branch: `main`
+- branch: `main` at `3024ee70d4097f324c1eb1e454adee24209a6a42`
 - notes:
   - the following variables are added to CMake:
     - `CLANG_STDPAR_PATH`: specifies the path to the forwarding header

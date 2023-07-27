@@ -1,7 +1,7 @@
 # `cuda_stdpar`
 
 - url: <https://github.com/quxflux/cuda_stdpar>
-- branch: `master`
+- branch: `master` at `bbfc7517242a27cf2e5c012d7d1530d40107a6a7`
 - notes:
   - the following variables are added to CMake:
     - `STDPAR_PATH`: specifies the path to the forwarding header

@@ -1,7 +1,7 @@
 # `cuda-stdpar-samples`
 
 - url: <https://github.com/heidrifx/cuda-stdpar-samples>
-- branch: `main`
+- branch: `main` at `9972980f81c338f52d23cb81733a279b2c15109b`
 - notes:
   - a build script named `compile_local_clang_stdpar.sh` is added
   - the following environment variables are considered by the script:
