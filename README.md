@@ -11,10 +11,13 @@ This repository contains:
    ROCm GPU acceleration for Standard C++ Algorithms, please see the
    [RFC](https://discourse.llvm.org/t/rfc-adding-c-parallel-algorithm-offload-support-to-clang-llvm/72159)
    and [the patch set](https://reviews.llvm.org/D155769).
-2. A set of diffs, under the `/data` folder, which capture the changes needed to
-   enable Standard Algorithm offload in LLVM (this is a pre-requisite), as well
-   as in a number of client apps;
-3. A minimal but slowly growing set of unit tests.
+2. A set of diffs, under the [data folder](/data/patches/), which capture the
+   changes needed to enable Standard Algorithm offload in LLVM (this is a
+   pre-requisite), as well as in a number of client apps;
+3. A slowly growing set of minimalistic performance studies, under the
+   [docs](/docs/performance_studies/) folder, intended to give a sense of the
+   possible performance benefits / pitfalls associated with offload;
+4. A minimal but slowly growing set of unit tests.
 
 ## Algorithm Support Status
 
