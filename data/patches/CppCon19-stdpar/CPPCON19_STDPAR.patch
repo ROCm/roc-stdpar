@@ -130,21 +130,3 @@ index f8945dc..761b08a 100644
        counting_iterator<long>(0L), counting_iterator<long>(factorial(N)),
        route_cost(),
        route_cost::min,
-@@ -202,7 +202,7 @@ int main(int argc, char **argv) {
- 
-   find_best_route(distances, std::min(N, 5));
- 
--  std::cout << "Checking " << factorial(N) 
-+  std::cout << "Checking " << factorial(N)
-             << " routes for the best way to visit " << N << " cities...\n";
-   auto start = std::chrono::steady_clock::now();
- 
-@@ -211,7 +211,7 @@ int main(int argc, char **argv) {
-   auto end = std::chrono::steady_clock::now();
-   auto duration =
-     std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
--  std::cout << "Took " << (duration / 1000) << "." << std::setw(3) 
-+  std::cout << "Took " << (duration / 1000) << "." << std::setw(3)
-             << std::setfill('0') << (duration % 1000) << "s\n";
- 
-   print_route(best_route, N);

@@ -4,8 +4,6 @@
 - branch: `2.0.2-dev`
 - notes:
   - execution policies are switched from `par` to `par_unseq` to enable offload
-  - HIP equivalents are added for invocations of CUDA functions
-  - `printf` support is temporarily disabled
   - a Makefile named `Makefile-stdpar` is added
     - the following environment variables are considered by the Makefile:
       - `STDPAR_CXX`: specifies the compiler to use, which must be Clang/LLVM

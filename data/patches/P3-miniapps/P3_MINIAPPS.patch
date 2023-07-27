@@ -2,15 +2,6 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
 index e691a7c..16461cb 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -4,7 +4,7 @@ project(P3miniapps LANGUAGES CXX)
- # Add cmake helpers
- list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_SOURCE_DIR}/cmake")
- 
--# Find libraries 
-+# Find libraries
- find_package(mdspan CONFIG)
- if(NOT mdspan_FOUND)
-     add_subdirectory(ext_lib/mdspan)
 @@ -21,6 +21,13 @@ if(PROGRAMMING_MODEL STREQUAL "KOKKOS")
      endif()
  endif()
@@ -237,44 +228,6 @@ diff --git a/miniapps/heat3d/stdpar/Init.hpp b/miniapps/heat3d/stdpar/Init.hpp
 index 84c74f2..e81b7f5 100644
 --- a/miniapps/heat3d/stdpar/Init.hpp
 +++ b/miniapps/heat3d/stdpar/Init.hpp
-@@ -27,7 +27,7 @@ void initialize(Config &conf,
-   x = RealView1D("x", conf.nx);
-   y = RealView1D("y", conf.ny);
-   z = RealView1D("z", conf.nz);
-- 
-+
-   u  = RealView3D("u",  conf.nx, conf.ny, conf.nz);
-   un = RealView3D("un", conf.nx, conf.ny, conf.nz);
- 
-@@ -46,7 +46,7 @@ void initialize(Config &conf,
-         y(iy) = ytmp;
-         z(iz) = ztmp;
-         u(ix, iy, iz) = conf.umax
--          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI); 
-+          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI);
-       }
-     }
-   }
-@@ -71,7 +71,7 @@ void finalize(Config &conf, float64 time,
-   x.updateSelf();
-   y.updateSelf();
-   z.updateSelf();
--  
-+
-   for(int iz=0; iz<nz; iz++) {
-     for(int iy=0; iy<ny; iy++) {
-       for(int ix=0; ix<nx; ix++) {
-@@ -80,8 +80,8 @@ void finalize(Config &conf, float64 time,
-         const real_type ztmp = z(iz);
- 
-         const real_type u_init = conf.umax
--          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI); 
--        
-+          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI);
-+
-         un(ix, iy, iz) = u_init * exp(-conf.Kappa * (pow((2.0 * M_PI / conf.Lx), 2) + pow((2.0 * M_PI / conf.Ly), 2) + pow((2.0 * M_PI / conf.Lz), 2) ) * time);
-       }
-     }
 @@ -116,6 +116,8 @@ void performance(Config &conf, double seconds) {
      std::string backend = "CUDA";
    #elif defined( ENABLE_OPENMP )
@@ -297,15 +250,6 @@ index ae88da4..498060b 100644
    #define SIMD_LOOP
    #define SIMD_WIDTH 1
    using default_layout = stdex::layout_left;
-@@ -15,7 +15,7 @@ namespace stdex = std::experimental;
- #else
-   using default_layout = stdex::layout_right;
-   using default_iterate_layout = stdex::layout_right;
--  
-+
-   #define SIMD_WIDTH 8
-   #include<omp.h>
-   #if defined(SIMD)
 diff --git a/miniapps/heat3d_mpi/stdpar/CMakeLists.txt b/miniapps/heat3d_mpi/stdpar/CMakeLists.txt
 index 1495637..89a9582 100644
 --- a/miniapps/heat3d_mpi/stdpar/CMakeLists.txt
@@ -332,53 +276,6 @@ diff --git a/miniapps/heat3d_mpi/stdpar/Init.hpp b/miniapps/heat3d_mpi/stdpar/In
 index f51beda..1efcb50 100644
 --- a/miniapps/heat3d_mpi/stdpar/Init.hpp
 +++ b/miniapps/heat3d_mpi/stdpar/Init.hpp
-@@ -45,7 +45,7 @@ void testComm(Config &conf, Comm &comm, RealView3D &u, RealView3D &un) {
- 
-   auto print_error = [&](int ix, int iy, int iz, int gix, int giy, int giz) {
-     auto diff = un(ix, iy, iz) - u(ix, iy, iz);
--    if (fabs(diff) > .1) { 
-+    if (fabs(diff) > .1) {
-       printf("Pb at rank %d (%d, %d, %d) u(%d, %d, %d): %lf, un(%d, %d, %d): %lf, error: %lf\n",
-              comm.rank(), cart_rank.at(0), cart_rank.at(1), cart_rank.at(2), ix, iy, iz, u(ix, iy, iz), gix, giy, giz, un(ix, iy, iz), diff);
-     }
-@@ -104,7 +104,7 @@ void initialize(Config &conf, Comm &comm,
-   x = RealView1D("x", conf.nx);
-   y = RealView1D("y", conf.ny);
-   z = RealView1D("z", conf.nz);
-- 
-+
-   const size_t nx_halo = conf.nx+2;
-   const size_t ny_halo = conf.ny+2;
-   const size_t nz_halo = conf.nz+2;
-@@ -137,7 +137,7 @@ void initialize(Config &conf, Comm &comm,
-         y(iy) = ytmp;
-         z(iz) = ztmp;
-         u(ix, iy, iz) = conf.umax
--          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI); 
-+          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI);
-       }
-     }
-   }
-@@ -155,7 +155,7 @@ void finalize(Config &conf, Comm &comm, float64 time,
-   const int nx = conf.nx;
-   const int ny = conf.ny;
-   const int nz = conf.nz;
--  
-+
-   auto topology  = comm.topology();
-   for(int iz=0; iz<nz; iz++) {
-     for(int iy=0; iy<ny; iy++) {
-@@ -165,8 +165,8 @@ void finalize(Config &conf, Comm &comm, float64 time,
-         const real_type ztmp = z(iz);
- 
-         const real_type u_init = conf.umax
--          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI); 
--        
-+          * cos(xtmp / conf.Lx * 2.0 * M_PI + ytmp / conf.Ly * 2.0 * M_PI + ztmp / conf.Lz * 2.0 * M_PI);
-+
-         un(ix, iy, iz) = u_init * exp(-conf.Kappa * (pow((2.0 * M_PI / conf.Lx), 2) + pow((2.0 * M_PI / conf.Ly), 2) + pow((2.0 * M_PI / conf.Lz), 2) ) * time);
-       }
-     }
 @@ -201,7 +201,7 @@ void performance(Config &conf, Comm &comm, double seconds) {
    double GFlops = static_cast<double>(n) * size * static_cast<double>(conf.nbiter) * 9 / 1.e9;
  
@@ -401,15 +298,6 @@ index 249876d..6c878fe 100644
    #define SIMD_LOOP
    #define SIMD_WIDTH 1
    using default_layout = stdex::layout_left;
-@@ -15,7 +15,7 @@ namespace stdex = std::experimental;
- #else
-   using default_layout = stdex::layout_right;
-   using default_iterate_layout = stdex::layout_right;
--  
-+
-   #define SIMD_WIDTH 8
-   #include<omp.h>
-   #if defined(SIMD)
 diff --git a/miniapps/vlp4d/stdpar/CMakeLists.txt b/miniapps/vlp4d/stdpar/CMakeLists.txt
 index ca5d616..34d03ea 100644
 --- a/miniapps/vlp4d/stdpar/CMakeLists.txt
@@ -474,275 +362,6 @@ index 1b29915..2b80c7f 100644
    #define SIMD_LOOP
    #define SIMD_WIDTH 1
    using default_layout = stdex::layout_left;
-@@ -45,13 +45,13 @@ using size_type = uint64_t; // uint32_t
- template <size_t ND>
- using shape_nd = std::array<int, ND>;
- 
--template < typename ScalarType > 
-+template < typename ScalarType >
- using View1D = View<ScalarType, stdex::dextents< size_type, 1 >, default_layout >;
--template < typename ScalarType > 
-+template < typename ScalarType >
- using View2D = View<ScalarType, stdex::dextents< size_type, 2 >, default_layout >;
--template < typename ScalarType > 
-+template < typename ScalarType >
- using View3D = View<ScalarType, stdex::dextents< size_type, 3 >, default_layout >;
--template < typename ScalarType > 
-+template < typename ScalarType >
- using View4D = View<ScalarType, stdex::dextents< size_type, 4 >, default_layout >;
- 
- using RealView1D = View1D<Real>;
-diff --git a/miniapps/vlp4d/stdpar/vlp4d.cpp b/miniapps/vlp4d/stdpar/vlp4d.cpp
-index 9bbf3a3..b2c1de7 100644
---- a/miniapps/vlp4d/stdpar/vlp4d.cpp
-+++ b/miniapps/vlp4d/stdpar/vlp4d.cpp
-@@ -1,8 +1,8 @@
- /*
-- * @brief The vlp4d code solves Vlasov-Poisson equations in 4D (2d space, 2d velocity). 
-- *        From the numerical point of view, vlp4d is based on a semi-lagrangian scheme. 
-- *        Vlasov solver is typically based on a directional Strang splitting. 
-- *        The Poisson equation is treated with 2D Fourier transforms. 
-+ * @brief The vlp4d code solves Vlasov-Poisson equations in 4D (2d space, 2d velocity).
-+ *        From the numerical point of view, vlp4d is based on a semi-lagrangian scheme.
-+ *        Vlasov solver is typically based on a directional Strang splitting.
-+ *        The Poisson equation is treated with 2D Fourier transforms.
-  *        For the sake of simplicity, all directions are, for the moment, handled with periodic boundary conditions.
-  *        The Vlasov solver is based on advection's operators:
-  *
-diff --git a/miniapps/vlp4d_mpi/stdpar/Init.cpp b/miniapps/vlp4d_mpi/stdpar/Init.cpp
-index 9a52997..1636441 100644
---- a/miniapps/vlp4d_mpi/stdpar/Init.cpp
-+++ b/miniapps/vlp4d_mpi/stdpar/Init.cpp
-@@ -41,7 +41,7 @@ void import(const char *f, Config *conf) {
-       tmp = fgetc(stream);
-     while(tmp != ':');
-     fscanf(stream, " %le\n", &(dom->minPhy_[i]));
--                
-+
-     do
-       tmp = fgetc(stream);
-     while(tmp != ':');
-@@ -62,23 +62,23 @@ void import(const char *f, Config *conf) {
-     tmp = fgetc(stream);
-   while(tmp != ':');
-   fscanf(stream, " %d\n", &(dom->nbiter_));
--      
-+
-   do
-     tmp = fgetc(stream);
-   while(tmp != ':');
-   fscanf(stream, " %d\n", &(dom->ifreq_));
--         
-+
-   do
-     tmp = fgetc(stream);
-   while(tmp != ':');
-   fscanf(stream, " %d\n", &(dom->fxvx_));
- 
-   dom->idcase_ = atoi(idcase);
--                          
-+
-   for(int i = 0; i < DIMENSION; i++) {
-     dom->dx_[i] = (dom->maxPhy_[i] - dom->minPhy_[i]) / dom->nxmax_[i];
-   }
--                            
-+
-   fclose(stream);
-   for(int i = 0; i < DIMENSION; i++) {
-     if(dom->nxmax_[i] < (MMAX + 2)) {
-@@ -95,7 +95,7 @@ void print(Config *conf) {
-   printf("Number of points in  y with the coarse mesh : %d\n", dom->nxmax_[1]);
-   printf("Number of points in Vx with the coarse mesh : %d\n", dom->nxmax_[2]);
-   printf("Number of points in Vy with the coarse mesh : %d\n", dom->nxmax_[3]);
--            
-+
-   printf("\n** Defintion of the geometry of the domain\n");
-   printf("Minimal value of Ex : %lf\n", dom->minPhy_[0]);
-   printf("Maximal value of Ex : %lf\n", dom->maxPhy_[0]);
-@@ -106,24 +106,24 @@ void print(Config *conf) {
-   printf("Maximal value of Vx   : %lf\n", dom->maxPhy_[2]);
-   printf("Minimal value of Vy   : %lf\n", dom->minPhy_[3]);
-   printf("Maximal value of Vy   : %lf\n", dom->maxPhy_[3]);
--          
-+
-   printf("\n** Considered test cases");
-   printf("\n-10- Landau Damping");
-   printf("\n-11- Landau Damping 2");
-   printf("\n-20- Two beam instability");
-   printf("\nNumber of the chosen test case : %d\n", dom->idcase_);
--            
-+
-   printf("\n** Iterations in time and diagnostics\n");
-   printf("Time step : %lf\n", dom->dt_);
-   printf("Number of total iterations : %d\n", dom->nbiter_);
-   printf("Frequency of diagnostics : %d\n", dom->ifreq_);
--                    
-+
-   printf("Diagnostics of fxvx : %d\n", dom->fxvx_);
- }
- 
- void initcase(Config* conf, RealView4D &fn) {
-   Domain* dom = &(conf->dom_);
--   
-+
-   switch(dom->idcase_) {
-     case 2:
-       testcaseCYL02(conf, fn);
-@@ -161,22 +161,22 @@ void testcaseCYL02(Config* conf, RealView4D &fn) {
-           float64 x = dom->minPhy_[0] + ix * dom->dx_[0];
-           float64 xx = x;
-           float64 vv = vx;
--                                                                                                    
-+
-           float64 hv = 0.0;
-           float64 hx = 0.0;
--                                                                                                                       
-+
-           if((vv <= cc + rc) && (vv >= cc - rc)) {
-             hv = cos(PERIOD * ((vv - cc) / rc));
-           } else if((vv <= -cc + rc) && (vv >= -cc - rc)) {
-             hv = -cos(PERIOD * ((vv + cc) / rc));
-           }
--                                                                                                                                 
-+
-           if((xx <= cc + rc) && (xx >= cc - rc)) {
-             hx = cos(PERIOD * ((xx - cc) / rc));
-           } else if((xx <= -cc + rc) && (xx >= -cc - rc)) {
-             hx = -cos(PERIOD * ((xx + cc) / rc));
-           }
--                                                                                                                                            
-+
-           fn(ix, iy, ivx, ivy) = (AMPLI * hx * hv);
-         }
-       }
-@@ -200,22 +200,22 @@ void testcaseCYL05(Config* conf, RealView4D &fn) {
-         for(int ix = dom->local_nxmin_[0]; ix < dom->local_nxmax_[0]; ix++) {
-           float64 xx = y;
-           float64 vv = vy;
--                                                                                
-+
-           float64 hv = 0.0;
-           float64 hx = 0.0;
--                                                                                                    
-+
-           if((vv <= cc + rc) && (vv >= cc - rc)) {
-             hv = cos(PERIOD * ((vv - cc) / rc));
-           } else if((vv <= -cc + rc) && (vv >= -cc - rc)) {
-             hv = -cos(PERIOD * ((vv + cc) / rc));
-           }
--                                                                                                              
-+
-           if((xx <= cc + rc) && (xx >= cc - rc)) {
-             hx = cos(PERIOD * ((xx - cc) / rc));
-           } else if((xx <= -cc + rc) && (xx >= -cc - rc)) {
-             hx = -cos(PERIOD * ((xx + cc) / rc));
-           }
--                                                                                                                                                                
-+
-           fn(ix, iy, ivx, ivy) = AMPLI * hx * hv;
-         }
-       }
-@@ -230,12 +230,12 @@ void testcaseSLD10(Config* conf, RealView4D &fn) {
-     for(int ivx = dom->local_nxmin_[2]; ivx <= dom->local_nxmax_[2]; ivx++) {
-       float64 vy = dom->minPhy_[3] + ivy * dom->dx_[3];
-       float64 vx = dom->minPhy_[2] + ivx * dom->dx_[2];
--                                        
-+
-       for(int iy = dom->local_nxmin_[1]; iy <= dom->local_nxmax_[1]; iy++) {
-         float64 y = dom->minPhy_[1] + iy * dom->dx_[1];
-         for(int ix = dom->local_nxmin_[0]; ix <= dom->local_nxmax_[0]; ix++) {
-           float64 x = dom->minPhy_[0] + ix * dom->dx_[0];
--                                                                                    
-+
-           float64 sum = (vx * vx + vy * vy);
-           fn(ix, iy, ivx, ivy) = (1. / (2 * M_PI)) * exp(-0.5 * (sum)) * (1 + 0.05 * (cos(0.5 * x) * cos(0.5 * y)));
-         }
-@@ -254,7 +254,7 @@ void testcaseTSI20(Config* conf, RealView4D &fn) {
-   float64 alphay  = 0.25;
-   float64 kx  = 0.2;
-   float64 ky  = 0.2;
--                        
-+
-   for(int ivy = dom->local_nxmin_[3]; ivy <= dom->local_nxmax_[3]; ivy++) {
-     for(int ivx = dom->local_nxmin_[2]; ivx <= dom->local_nxmax_[2]; ivx++) {
-       double vy = dom->minPhy_[3] + ivy * dom->dx_[3];
-@@ -263,7 +263,7 @@ void testcaseTSI20(Config* conf, RealView4D &fn) {
-         for(int ix = dom->local_nxmin_[0]; ix <= dom->local_nxmax_[0]; ix++) {
-           double yy = dom->minPhy_[1] + iy * dom->dx_[1];
-           double xx = dom->minPhy_[0] + ix * dom->dx_[0];
--          fn(ix, iy, ivx, ivy) = 
-+          fn(ix, iy, ivx, ivy) =
-             1./(4*M_PI*vthx*vthy)*
-             (1-alphax*sin(kx*xx)-alphay*sin(ky*yy))*
-             (exp(-.5*(pow((vx-vd)/vthx,2)+pow(vy/vthy,2)))+
-@@ -299,10 +299,10 @@ void testcase_ptest_check(Config* conf, Distrib &comm, RealView4D &halo_fn) {
-     for(int ivx = node->xmin_[2] - offm; ivx <= node->xmax_[2] + offp; ivx++) {
-       const int jvy = (dom->nxmax_[3] + ivy) % dom->nxmax_[3];
-       const int jvx = (dom->nxmax_[2] + ivx) % dom->nxmax_[2];
--                                           
-+
-       for(int iy = node->xmin_[1] - offm; iy <= node->xmax_[1] + offp; iy++) {
-         const int jy = (dom->nxmax_[1] + iy) % dom->nxmax_[1];
--                                                                  
-+
-         for(int ix = node->xmin_[0] - offm; ix <= node->xmax_[0] + offp; ix++) {
-           const int jx = (dom->nxmax_[0] + ix) % dom->nxmax_[0];
-           double fval = halo_fn(ix, iy, ivx, ivy);
-@@ -311,7 +311,7 @@ void testcase_ptest_check(Config* conf, Distrib &comm, RealView4D &halo_fn) {
-           if(fabs(diff) > .1) {
-             printf("[%d] Pb %d %d %d %d: %lf %lf %lf\n", comm.pid(), ivy, ivx, iy, ix, fval, ref, diff);
-           } else {
--            //printf("[%d] OK %d %d %d %d: %lf %lf\n", comm.pid(),ivy,ivx,iy,ix, fval,ref);
-+            printf("[%d] OK %d %d %d %d: %lf %lf\n", comm.pid(),ivy,ivx,iy,ix, fval,ref);
-           }
-         }
-       }
-@@ -320,14 +320,14 @@ void testcase_ptest_check(Config* conf, Distrib &comm, RealView4D &halo_fn) {
- }
- 
- void init(const char *file, Config *conf, Distrib &comm, RealView4D &fn, RealView4D &fnp1, RealView4D &fn_tmp, Efield **ef, Diags **dg, Spline **spline, std::vector<Timer*> &timers) {
--  Domain* dom = &conf->dom_; 
-+  Domain* dom = &conf->dom_;
-   import(file, conf);
-   if(comm.master()) print(conf);
- 
-   // Initialize communication manager
-   comm.createDecomposition(conf);
-   Urbnode *mynode = comm.node();
--  
-+
-   shape_nd<DIMENSION> shape_halo;
-   shape_nd<DIMENSION> nxmin_halo;
-   for(int i=0; i<DIMENSION; i++)
-@@ -349,23 +349,23 @@ void init(const char *file, Config *conf, Distrib &comm, RealView4D &fn, RealVie
-   // The functions testcase_ptest_init and testcase_ptest_check are present
-   // to check the good behavior of comm_exchange_halo. These calls are also
-   // there to initiate a first round of communication as a startup phase.
--  
-+
-   testcase_ptest_init(conf, comm, fn);
-   comm.exchangeHalo(conf, fn, timers);
-   testcase_ptest_check(conf, comm, fn);
--  
-+
-   timers[TimerEnum::pack]->reset();
-   timers[TimerEnum::comm]->reset();
-   timers[TimerEnum::unpack]->reset();
--  
-+
-   *ef = new Efield(conf, {dom->nxmax_[0], dom->nxmax_[1]});
--  
-+
-   // allocate and initialize diagnostics data structures
-   *dg = new Diags(conf);
- 
-   // allocate
-   *spline = new Spline(conf);
--  
-+
-   // Initialize distribution function
-   fn = RealView4D("fn", shape_halo, nxmin_halo);
-   fn.fill(0);
 diff --git a/tests/stdpar/CMakeLists.txt b/tests/stdpar/CMakeLists.txt
 index 1429cb8..0fbe89e 100644
 --- a/tests/stdpar/CMakeLists.txt
@@ -779,111 +398,39 @@ index 3344d9c..e30ef2d 100644
    #define SIMD_LOOP
    #define SIMD_WIDTH 1
    using default_layout = stdex::layout_left;
-@@ -57,13 +57,13 @@ using size_type = uint32;
- template <size_t ND>
- using shape_nd = std::array<int, ND>;
- 
--template < typename ScalarType > 
-+template < typename ScalarType >
- using View1D = View<ScalarType, stdex::dextents< size_type, 1 >, default_layout >;
--template < typename ScalarType > 
-+template < typename ScalarType >
- using View2D = View<ScalarType, stdex::dextents< size_type, 2 >, default_layout >;
--template < typename ScalarType > 
-+template < typename ScalarType >
- using View3D = View<ScalarType, stdex::dextents< size_type, 3 >, default_layout >;
--template < typename ScalarType > 
-+template < typename ScalarType >
- using View4D = View<ScalarType, stdex::dextents< size_type, 4 >, default_layout >;
- 
- using RealView1D = View1D<Real>;
 diff --git a/tests/stdpar/test_view.cpp b/tests/stdpar/test_view.cpp
 index b5935a5..8ba5e75 100644
 --- a/tests/stdpar/test_view.cpp
 +++ b/tests/stdpar/test_view.cpp
-@@ -28,35 +28,37 @@ void set_inside_function(RealView2D shallow_copy_to_a_View) {
+@@ -28,7 +28,8 @@ void set_inside_function(RealView2D shallow_copy_to_a_View) {
      });
  }
  
 -void test_copy_constructor() {
--  RealView2D simple("simple", 16, 16);
--  RealView2D reference("reference", 16, 16);
--
--  set_inside_function(simple);
--
--  // Set in the main function
--  const int n = reference.extent(0);
--  const int m = reference.extent(1);
--
--  Iterate_policy<2> policy2d({0, 0}, {n, m});
--
--  auto _reference = reference.mdspan();
--  Impl::for_each(policy2d,
--    [=] (const int i, const int j){
--      _reference(i, j) = i + j * 0.2 + 0.01;
--    });
--
--  simple.updateSelf();
--  reference.updateSelf();
--
--  // Check if the host data are identical
--  for(int j=0; j<m; j++) {
--    for(int i=0; i<n; i++) {
--      ASSERT_EQ( simple(i, j), reference(i, j) );
--      ASSERT_NE( simple(i, j), 0.0 ); // Just to make sure simple has some value
 +#if !defined(__STDPAR__) && !defined(__GNUC__)
 +  void test_copy_constructor() {
-+    RealView2D simple("simple", 16, 16);
-+    RealView2D reference("reference", 16, 16);
-+
-+    set_inside_function(simple);
-+
-+    // Set in the main function
-+    const int n = reference.extent(0);
-+    const int m = reference.extent(1);
-+
-+    Iterate_policy<2> policy2d({0, 0}, {n, m});
-+
-+    auto _reference = reference.mdspan();
-+    Impl::for_each(policy2d,
-+      [=] (const int i, const int j){
-+        _reference(i, j) = i + j * 0.2 + 0.01;
-+      });
-+
-+    simple.updateSelf();
-+    reference.updateSelf();
-+
-+    // Check if the host data are identical
-+    for(int j=0; j<m; j++) {
-+      for(int i=0; i<n; i++) {
-+        ASSERT_EQ( simple(i, j), reference(i, j) );
-+        ASSERT_NE( simple(i, j), 0.0 ); // Just to make sure simple has some value
-+      }
+     RealView2D simple("simple", 16, 16);
+     RealView2D reference("reference", 16, 16);
+ 
+@@ -56,7 +57,8 @@ void test_copy_constructor() {
+         ASSERT_NE( simple(i, j), 0.0 ); // Just to make sure simple has some value
+       }
      }
-   }
 -}
++  }
 +#endif
  
  void test_assignment_operator() {
    // [NOTE] Do not recommend to use assignement opertor
-@@ -229,16 +231,18 @@ void test_swap() {
- }
- 
- TEST( VIEW, DEFAULT_CONSTRUCTOR ) {
--  RealView2D empty; 
-+  RealView2D empty;
-   RealView2D simple("simple", std::array<size_type, 2>{2, 3}); // Simple constructor
-   RealView2D Kokkos_like("kokkos_like", 2, 3); // Kokkos like constructor
-   RealView2D offset_view("offset_view", std::array<size_type, 2>{3, 4}, std::array<int, 2>{-1, -1}); // Offset view
+@@ -236,9 +238,11 @@ TEST( VIEW, DEFAULT_CONSTRUCTOR ) {
    RealView2D offset_view_int("offset_view", std::array<int, 2>{3, 4}, std::array<int, 2>{-1, -1}); // Offset view
  }
  
 -TEST( VIEW, COPY_CONSTRUCTOR ) {
--  test_copy_constructor();
--}
 +#if !defined(__STDPAR__) && !defined(__GNUC__)
 +  TEST( VIEW, COPY_CONSTRUCTOR ) {
-+    test_copy_constructor();
+     test_copy_constructor();
+-}
 +  }
 +#endif
  
