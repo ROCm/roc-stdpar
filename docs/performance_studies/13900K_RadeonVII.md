@@ -106,6 +106,20 @@ directly.
 | MIDDLE | 19               | 214              | 11                       |
 | LARGE  | 17               | 194              | 11                       |
 
+## `nbody-stdpar`
+
+| Test         | A - CPU (ms) | B - GPU (ms) | A / B (higher is better) |
+|:------------:|:------------:|:------------:|:------------------------:|
+| 4096 bodies  | 2192         | 2943         | 0.7                      |
+| 8192 bodies  | 8054         | 5831         | 1.3                      |
+| 16384 bodies | 32011        | 11147        | 2.8                      |
+| 32768 bodies | 127887       | 36974        | 3.4                      |
+| 65536 bodies | 510415       | 87578        | 5.8                      |
+
+- notes:
+  - run parameterised with `Simulation duration == 100` and
+    `Integration timestep == 0.1`
+
 ## P3-miniapps
 
 - [repo](https://github.com/yasahi-hpc/P3-miniapps)
