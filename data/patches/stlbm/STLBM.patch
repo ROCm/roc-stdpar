@@ -1,18 +1,20 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 6116654..c544c06 100644
+index 6116654..33bfda6 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -49,8 +49,12 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL GNU)
-     set (USE_TBB ON)
+@@ -50,6 +50,15 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL GNU)
      #set(CMAKE_EXE_LINKER_FLAGS "-ltbb")
  elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL Clang)
--    set(CMAKE_CXX_FLAGS "-std=c++17 -O3 -Wall -Wextra -Wpedantic")
-+    set(CMAKE_CXX_FLAGS "-std=c++17 -O3 -Wall -Wextra -Wpedantic -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET}")
-+    if(NOT STDPAR_TARGET MATCHES "^gfx9")
-+        list(APPEND CMAKE_CXX_FLAGS --stdpar-interpose-alloc)
-+    endif ()
+     set(CMAKE_CXX_FLAGS "-std=c++17 -O3 -Wall -Wextra -Wpedantic")
++    if(DEFINED STDPAR_TARGET)
++        string(APPEND CMAKE_CXX_FLAGS " -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET}")
++        if(NOT STDPAR_TARGET MATCHES "^gfx9")
++            string(APPEND CMAKE_CXX_FLAGS " --stdpar-interpose-alloc")
++        endif ()
++        set(CMAKE_EXE_LINKER_FLAGS "-stdpar")
++    else()
++        string(APPEND CMAKE_CXX_FLAGS " -march=native -fopenmp-simd")
++    endif()
      set (USE_TBB ON)
-+    set (CMAKE_EXE_LINKER_FLAGS "-stdpar")
      #set(CMAKE_EXE_LINKER_FLAGS "-ltbb")
  elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL Intel)
-     set(CMAKE_CXX_FLAGS "-std=c++17 -ipo -O3 -xHOST -Wall")

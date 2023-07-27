@@ -1,14 +1,3 @@
-diff --git a/.gitignore b/.gitignore
-index 259148f..c971e39 100644
---- a/.gitignore
-+++ b/.gitignore
-@@ -30,3 +30,5 @@
- *.exe
- *.out
- *.app
-+.vscode
-+build
-\ No newline at end of file
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 index e691a7c..16461cb 100644
 --- a/CMakeLists.txt
@@ -36,21 +25,114 @@ index e691a7c..16461cb 100644
  add_subdirectory(lib)
  
  include(CTest)
+diff --git a/lib/Iteration.hpp b/lib/Iteration.hpp
+index 11ff7d8..e98435b 100644
+--- a/lib/Iteration.hpp
++++ b/lib/Iteration.hpp
+@@ -73,4 +73,79 @@ private:
+   }
+ };
+ 
++/*
++ * This class is borrowed from Lulesh:
++ * https://github.com/LLNL/LULESH
++ */
++template<typename T>
++struct Counting_iterator
++{
++
++private:
++  using self = Counting_iterator;
++
++public:
++  using Index_t = T;
++  using value_type = Index_t;
++  using difference_type = typename std::make_signed<T>::type;
++  using pointer = Index_t*;
++  using reference = Index_t&;
++  using iterator_category = std::random_access_iterator_tag;
++
++  Counting_iterator() : value(0) { }
++  explicit Counting_iterator(value_type v) : value(v) { }
++
++  value_type operator*() const { return value; }
++  value_type operator[](difference_type n) const { return value + n; }
++
++  self& operator++() { ++value; return *this; }
++  self operator++(int) {
++    self result{value};
++    ++value;
++    return result;
++  }
++  self& operator--() { --value; return *this; }
++  self operator--(int) {
++    self result{value};
++    --value;
++    return result;
++  }
++  self& operator+=(difference_type n) { value += n; return *this; }
++  self& operator-=(difference_type n) { value -= n; return *this; }
++
++  friend self operator+(self const& i, difference_type n) {
++    return self(i.value + n);
++  }
++  friend self operator+(difference_type n, self const& i) {
++    return self(i.value + n);
++  }
++  friend difference_type operator-(self const& x, self const& y) {
++    return x.value - y.value;
++  }
++  friend self operator-(self const& i, difference_type n) {
++    return self(i.value - n);
++  }
++
++  friend bool operator==(self const& x, self const& y) {
++    return x.value == y.value;
++  }
++  friend bool operator!=(self const& x, self const& y) {
++    return x.value != y.value;
++  }
++  friend bool operator<(self const& x, self const& y) {
++    return x.value < y.value;
++  }
++  friend bool operator<=(self const& x, self const& y) {
++    return x.value <= y.value;
++  }
++  friend bool operator>(self const& x, self const& y) {
++    return x.value > y.value;
++  }
++  friend bool operator>=(self const& x, self const& y) {
++    return x.value >= y.value;
++  }
++private:
++  value_type value;
++};
++
+ #endif
 diff --git a/lib/stdpar/CMakeLists.txt b/lib/stdpar/CMakeLists.txt
-index 0eecba7..c349f1c 100644
+index 0eecba7..c5ba1ac 100644
 --- a/lib/stdpar/CMakeLists.txt
 +++ b/lib/stdpar/CMakeLists.txt
-@@ -12,8 +12,15 @@ elseif(BACKEND STREQUAL "OPENMP")
+@@ -12,8 +12,24 @@ elseif(BACKEND STREQUAL "OPENMP")
      target_link_libraries(math_lib INTERFACE std::mdspan OpenMP::OpenMP_CXX fftw3)
      target_compile_definitions(math_lib INTERFACE ENABLE_OPENMP ENABLE_STDPAR)
      target_compile_options(math_lib INTERFACE -O3)
 +elseif(BACKEND STREQUAL "CLANG")
-+    find_package(rocblas REQUIRED)
-+    find_package(rocfft REQUIRED)
-+    target_link_libraries(math_lib INTERFACE std::mdspan roc::rocblas roc::rocfft)
-+    target_compile_definitions(math_lib INTERFACE ENABLE_HIP ENABLE_STDPAR)
-+    target_compile_options(math_lib INTERFACE -O3 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
-+    target_link_options(math_lib INTERFACE -stdpar)
++    if(DEFINED STDPAR_PATH)
++        find_package(rocblas REQUIRED)
++        find_package(rocfft REQUIRED)
++        target_link_libraries(math_lib INTERFACE std::mdspan roc::rocblas roc::rocfft)
++        target_compile_definitions(math_lib INTERFACE ENABLE_HIP ENABLE_STDPAR)
++        target_compile_options(math_lib INTERFACE -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++        target_link_options(math_lib INTERFACE -stdpar)
++    else()
++        find_package(FFTW REQUIRED COMPONENTS DOUBLE_LIB)
++        target_link_libraries(math_lib INTERFACE std::mdspan fftw3)
++        target_compile_definitions(math_lib INTERFACE ENABLE_STDPAR)
++        target_compile_options(math_lib INTERFACE -march=native -fopenmp)
++        target_link_libraries(math_lib INTERFACE tbb)
++        target_link_options(math_lib INTERFACE -fopenmp)
++    endif()
  else()
 -    message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
 +    message(FATAL_ERROR "No parallel backend specified. One of CUDA, OPENMP or CLANG must be On.")
@@ -70,6 +152,38 @@ index a1a5d20..cda7c7f 100644
  #else
    #include "../OpenMP_FFT.hpp"
  #endif
+diff --git a/lib/stdpar/Parallel_For.hpp b/lib/stdpar/Parallel_For.hpp
+index 31b2339..dabdc19 100644
+--- a/lib/stdpar/Parallel_For.hpp
++++ b/lib/stdpar/Parallel_For.hpp
+@@ -1,10 +1,9 @@
+ #ifndef __PARALLEL_FOR_HPP__
+ #define __PARALLEL_FOR_HPP__
+ 
+-#include <thrust/iterator/counting_iterator.h>
+ #include "../Iteration.hpp"
+ 
+-using counting_iterator = thrust::counting_iterator<int>;
++using counting_iterator = Counting_iterator<int>;
+ 
+ namespace Impl {
+   // Only for 1D case
+diff --git a/lib/stdpar/Parallel_Reduce.hpp b/lib/stdpar/Parallel_Reduce.hpp
+index 424bcf0..d55f23e 100644
+--- a/lib/stdpar/Parallel_Reduce.hpp
++++ b/lib/stdpar/Parallel_Reduce.hpp
+@@ -1,10 +1,9 @@
+ #ifndef __PARALLEL_REDUCE_HPP__
+ #define __PARALLEL_REDUCE_HPP__
+ 
+-#include <thrust/iterator/counting_iterator.h>
+ #include "../Iteration.hpp"
+ 
+-using counting_iterator = thrust::counting_iterator<int>;
++using counting_iterator = Counting_iterator<int>;
+ 
+ namespace Impl {
+   // Only for 1D case
 diff --git a/lib/stdpar/Transpose.hpp b/lib/stdpar/Transpose.hpp
 index 70e6044..6935a47 100644
 --- a/lib/stdpar/Transpose.hpp
@@ -98,16 +212,21 @@ index 7314647..fb2b2d9 100644
 +    # add_subdirectory(vlp4d_mpi)
  endif()
 diff --git a/miniapps/heat3d/stdpar/CMakeLists.txt b/miniapps/heat3d/stdpar/CMakeLists.txt
-index 1426bde..602afb1 100644
+index 1426bde..6fc868d 100644
 --- a/miniapps/heat3d/stdpar/CMakeLists.txt
 +++ b/miniapps/heat3d/stdpar/CMakeLists.txt
-@@ -15,8 +15,11 @@ if(BACKEND STREQUAL "CUDA")
+@@ -15,8 +15,16 @@ if(BACKEND STREQUAL "CUDA")
      target_link_options(heat3d PUBLIC -stdpar=gpu)
  elseif(BACKEND STREQUAL "OPENMP")
      target_compile_options(heat3d PUBLIC -stdpar=multicore)
 +elseif(BACKEND STREQUAL "CLANG")
-+    target_compile_options(heat3d PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
-+    target_link_options(heat3d PUBLIC -stdpar)
++    if(DEFINED STDPAR_PATH)
++        target_compile_options(heat3d PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++        target_link_options(heat3d PUBLIC -stdpar)
++    else()
++        target_compile_options(heat3d PUBLIC -fopenmp-simd -march=native)
++        target_link_libraries(heat3d PUBLIC tbb)
++    endif()
  else()
 -    message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
 +    message(FATAL_ERROR "No parallel backend specified. One of CUDA, OPENMP or CLANG must be On.")
@@ -188,16 +307,21 @@ index ae88da4..498060b 100644
    #include<omp.h>
    #if defined(SIMD)
 diff --git a/miniapps/heat3d_mpi/stdpar/CMakeLists.txt b/miniapps/heat3d_mpi/stdpar/CMakeLists.txt
-index 1495637..7df0f63 100644
+index 1495637..89a9582 100644
 --- a/miniapps/heat3d_mpi/stdpar/CMakeLists.txt
 +++ b/miniapps/heat3d_mpi/stdpar/CMakeLists.txt
-@@ -18,8 +18,11 @@ if(BACKEND STREQUAL "CUDA")
+@@ -18,8 +18,16 @@ if(BACKEND STREQUAL "CUDA")
      target_link_options(heat3d_mpi PUBLIC -stdpar=gpu)
  elseif(BACKEND STREQUAL "OPENMP")
      target_compile_options(heat3d_mpi PUBLIC -stdpar=multicore)
 +elseif(BACKEND STREQUAL "CLANG")
-+    target_compile_options(heat3d_mpi PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offloar-arch=${STDPAR_TARGET})
-+    target_link_options(heat3d_mpi PUBLIC -stdpar)
++    if(DEFINED STDPAR_PATH)
++        target_compile_options(heat3d_mpi PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++        target_link_options(heat3d_mpi PUBLIC -stdpar)
++    else()
++        target_compile_options(heat3d_mpi PUBLIC -fopenmp-simd -march=native)
++        target_link_libraries(heat3d_mpi PUBLIC tbb)
++    endif()
  else()
 -    message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
 +    message(FATAL_ERROR "No parallel backend specified. One of CUDA, OPENMP or CLANG must be On.")
@@ -287,18 +411,25 @@ index 249876d..6c878fe 100644
    #include<omp.h>
    #if defined(SIMD)
 diff --git a/miniapps/vlp4d/stdpar/CMakeLists.txt b/miniapps/vlp4d/stdpar/CMakeLists.txt
-index ca5d616..4529b24 100644
+index ca5d616..34d03ea 100644
 --- a/miniapps/vlp4d/stdpar/CMakeLists.txt
 +++ b/miniapps/vlp4d/stdpar/CMakeLists.txt
-@@ -8,6 +8,11 @@ set(BACKEND AUTO CACHE STRING "CHOICE OF PARALLEL BACKEND")
+@@ -8,6 +8,18 @@ set(BACKEND AUTO CACHE STRING "CHOICE OF PARALLEL BACKEND")
  if(BACKEND STREQUAL "CUDA")
      target_compile_options(vlp4d PUBLIC -O3 -stdpar=gpu)
      target_link_options(vlp4d PUBLIC -stdpar=gpu -cudalib=cufft)
 +elseif(BACKEND STREQUAL "CLANG")
-+    find_package(rocfft REQUIRED)
-+    target_compile_options(vlp4d PUBLIC -O3 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} --stdpar-interpose-alloc)
-+    target_link_options(vlp4d PUBLIC -stdpar)
-+    target_link_libraries(vlp4d PUBLIC roc::rocfft)
++    if(DEFINED STDPAR_PATH)
++        find_package(rocfft REQUIRED)
++        target_compile_options(vlp4d PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} --stdpar-interpose-alloc)
++        target_link_options(vlp4d PUBLIC -stdpar)
++        target_link_libraries(vlp4d PUBLIC roc::rocfft)
++    else()
++        target_compile_definitions(vlp4d PUBLIC SIMD)
++        target_compile_options(vlp4d PUBLIC -fopenmp -march=native)
++        target_link_libraries(vlp4d PUBLIC tbb)
++        target_link_options(vlp4d PUBLIC -fopenmp)
++    endif()
  else()
      target_compile_options(vlp4d PUBLIC -O3 -stdpar=multicore -mp)
      target_compile_definitions(vlp4d PUBLIC SIMD)
@@ -361,105 +492,294 @@ index 1b29915..2b80c7f 100644
  using View4D = View<ScalarType, stdex::dextents< size_type, 4 >, default_layout >;
  
  using RealView1D = View1D<Real>;
-diff --git a/miniapps/vlp4d_mpi/stdpar/Spline.hpp b/miniapps/vlp4d_mpi/stdpar/Spline.hpp
-index 308eedc..716d773 100644
---- a/miniapps/vlp4d_mpi/stdpar/Spline.hpp
-+++ b/miniapps/vlp4d_mpi/stdpar/Spline.hpp
-@@ -20,7 +20,7 @@ public:
-   Spline(Config *conf) {
-     Domain *dom = &(conf->dom_);
+diff --git a/miniapps/vlp4d/stdpar/vlp4d.cpp b/miniapps/vlp4d/stdpar/vlp4d.cpp
+index 9bbf3a3..b2c1de7 100644
+--- a/miniapps/vlp4d/stdpar/vlp4d.cpp
++++ b/miniapps/vlp4d/stdpar/vlp4d.cpp
+@@ -1,8 +1,8 @@
+ /*
+- * @brief The vlp4d code solves Vlasov-Poisson equations in 4D (2d space, 2d velocity). 
+- *        From the numerical point of view, vlp4d is based on a semi-lagrangian scheme. 
+- *        Vlasov solver is typically based on a directional Strang splitting. 
+- *        The Poisson equation is treated with 2D Fourier transforms. 
++ * @brief The vlp4d code solves Vlasov-Poisson equations in 4D (2d space, 2d velocity).
++ *        From the numerical point of view, vlp4d is based on a semi-lagrangian scheme.
++ *        Vlasov solver is typically based on a directional Strang splitting.
++ *        The Poisson equation is treated with 2D Fourier transforms.
+  *        For the sake of simplicity, all directions are, for the moment, handled with periodic boundary conditions.
+  *        The Vlasov solver is based on advection's operators:
+  *
+diff --git a/miniapps/vlp4d_mpi/stdpar/Init.cpp b/miniapps/vlp4d_mpi/stdpar/Init.cpp
+index 9a52997..1636441 100644
+--- a/miniapps/vlp4d_mpi/stdpar/Init.cpp
++++ b/miniapps/vlp4d_mpi/stdpar/Init.cpp
+@@ -41,7 +41,7 @@ void import(const char *f, Config *conf) {
+       tmp = fgetc(stream);
+     while(tmp != ':');
+     fscanf(stream, " %le\n", &(dom->minPhy_[i]));
+-                
++
+     do
+       tmp = fgetc(stream);
+     while(tmp != ':');
+@@ -62,23 +62,23 @@ void import(const char *f, Config *conf) {
+     tmp = fgetc(stream);
+   while(tmp != ':');
+   fscanf(stream, " %d\n", &(dom->nbiter_));
+-      
++
+   do
+     tmp = fgetc(stream);
+   while(tmp != ':');
+   fscanf(stream, " %d\n", &(dom->ifreq_));
+-         
++
+   do
+     tmp = fgetc(stream);
+   while(tmp != ':');
+   fscanf(stream, " %d\n", &(dom->fxvx_));
  
--    nx_min_  = dom->local_nxmin_[0] - HALO_PTS; 
-+    nx_min_  = dom->local_nxmin_[0] - HALO_PTS;
-     ny_min_  = dom->local_nxmin_[1] - HALO_PTS;
-     nvx_min_ = dom->local_nxmin_[2] - HALO_PTS;
-     nvy_min_ = dom->local_nxmin_[3] - HALO_PTS;
-@@ -57,7 +57,7 @@ public:
-     using layout_type = RealView4D::layout_type;
+   dom->idcase_ = atoi(idcase);
+-                          
++
+   for(int i = 0; i < DIMENSION; i++) {
+     dom->dx_[i] = (dom->maxPhy_[i] - dom->minPhy_[i]) / dom->nxmax_[i];
+   }
+-                            
++
+   fclose(stream);
+   for(int i = 0; i < DIMENSION; i++) {
+     if(dom->nxmax_[i] < (MMAX + 2)) {
+@@ -95,7 +95,7 @@ void print(Config *conf) {
+   printf("Number of points in  y with the coarse mesh : %d\n", dom->nxmax_[1]);
+   printf("Number of points in Vx with the coarse mesh : %d\n", dom->nxmax_[2]);
+   printf("Number of points in Vy with the coarse mesh : %d\n", dom->nxmax_[3]);
+-            
++
+   printf("\n** Defintion of the geometry of the domain\n");
+   printf("Minimal value of Ex : %lf\n", dom->minPhy_[0]);
+   printf("Maximal value of Ex : %lf\n", dom->maxPhy_[0]);
+@@ -106,24 +106,24 @@ void print(Config *conf) {
+   printf("Maximal value of Vx   : %lf\n", dom->maxPhy_[2]);
+   printf("Minimal value of Vy   : %lf\n", dom->minPhy_[3]);
+   printf("Maximal value of Vy   : %lf\n", dom->maxPhy_[3]);
+-          
++
+   printf("\n** Considered test cases");
+   printf("\n-10- Landau Damping");
+   printf("\n-11- Landau Damping 2");
+   printf("\n-20- Two beam instability");
+   printf("\nNumber of the chosen test case : %d\n", dom->idcase_);
+-            
++
+   printf("\n** Iterations in time and diagnostics\n");
+   printf("Time step : %lf\n", dom->dt_);
+   printf("Number of total iterations : %d\n", dom->nbiter_);
+   printf("Frequency of diagnostics : %d\n", dom->ifreq_);
+-                    
++
+   printf("Diagnostics of fxvx : %d\n", dom->fxvx_);
+ }
  
-     if(std::is_same_v<layout_type, stdex::layout_left>) {
--      #if defined( _NVHPC_STDPAR_GPU )
-+      #if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
-         transpose_->forward(fn.data(), fn_trans_.data());
-         computeCoeffCore_parallel_xy(fn_trans_, fn_trans_tmp_);
-         transpose_->backward(fn_trans_.data(), fn.data());
-@@ -65,7 +65,7 @@ public:
-         computeCoeffCore_parallel_vxvy(fn, fn_tmp_);
-       #endif
-     } else {
--      #if defined( _NVHPC_STDPAR_GPU )
-+      #if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
-         computeCoeffCore_parallel_vxvy(fn, fn_tmp_);
-       #else
-         transpose_->forward(fn.data(), fn_trans_.data());
-@@ -78,7 +78,7 @@ public:
-   void computeCoeff_vxvy(RealView4D &fn) {
-     using layout_type = RealView4D::layout_type;
-     if(std::is_same_v<layout_type, stdex::layout_left>) {
--      #if defined( _NVHPC_STDPAR_GPU )
-+      #if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
-         computeCoeffCore_parallel_xy(fn, fn_tmp_);
-       #else
-         transpose_->forward(fn.data(), fn_trans_.data());
-@@ -86,7 +86,7 @@ public:
-         transpose_->backward(fn_trans_.data(), fn.data());
-       #endif
-     } else {
--      #if defined( _NVHPC_STDPAR_GPU )
-+      #if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
-         transpose_->forward(fn.data(), fn_trans_.data());
-         computeCoeffCore_parallel_vxvy(fn_trans_, fn_tmp_);
-         transpose_->backward(fn_trans_.data(), fn.data());
-@@ -230,7 +230,7 @@ private:
-             _fn_tmp(i0start+nn, i1, i2, i3) = _fn(i0start + nn, i1, i2, i3) + alpha * _fn_tmp(i0start + nn - 1, i1, i2, i3);
+ void initcase(Config* conf, RealView4D &fn) {
+   Domain* dom = &(conf->dom_);
+-   
++
+   switch(dom->idcase_) {
+     case 2:
+       testcaseCYL02(conf, fn);
+@@ -161,22 +161,22 @@ void testcaseCYL02(Config* conf, RealView4D &fn) {
+           float64 x = dom->minPhy_[0] + ix * dom->dx_[0];
+           float64 xx = x;
+           float64 vv = vx;
+-                                                                                                    
++
+           float64 hv = 0.0;
+           float64 hx = 0.0;
+-                                                                                                                       
++
+           if((vv <= cc + rc) && (vv >= cc - rc)) {
+             hv = cos(PERIOD * ((vv - cc) / rc));
+           } else if((vv <= -cc + rc) && (vv >= -cc - rc)) {
+             hv = -cos(PERIOD * ((vv + cc) / rc));
            }
-         #endif
--         
+-                                                                                                                                 
 +
-         // fn[iend+1] stores the precomputed right sum
-         float64 fnend = _fn(i0end+1, i1, i2, i3) + _fn(i0end, i1, i2, i3);
-         float64 alpha_k = alpha;
-@@ -238,7 +238,7 @@ private:
-           fnend += _fn(i0end - nn, i1, i2, i3) * alpha_k; //STDALGO
-           alpha_k *= alpha;
-         }
--        
-+
-         _fn(i0end, i1, i2, i3) = fnend * sqrt3;
-         #if defined( LONG_ENOUGH_BUFFER )
-           for(int nn = i0end - 1; nn >= i0start; nn--) {
-@@ -265,7 +265,7 @@ private:
-             _fn_tmp(i0, i1start + nn, i2, i3) = _fn(i0, i1start + nn, i2, i3) + alpha * _fn_tmp(i0, i1start + nn - 1, i2, i3);
+           if((xx <= cc + rc) && (xx >= cc - rc)) {
+             hx = cos(PERIOD * ((xx - cc) / rc));
+           } else if((xx <= -cc + rc) && (xx >= -cc - rc)) {
+             hx = -cos(PERIOD * ((xx + cc) / rc));
            }
-         #endif
--         
+-                                                                                                                                            
 +
-         // fn[iend+1] stores the precomputed right sum
-         float64 fnend = _fn(i0, i1end+1, i2, i3) + _fn(i0, i1end, i2, i3);
-         float64 alpha_k = alpha;
-@@ -273,7 +273,7 @@ private:
-           fnend += _fn(i0, i1end - nn, i2, i3) * alpha_k; //STDALGO
-           alpha_k *= alpha;
+           fn(ix, iy, ivx, ivy) = (AMPLI * hx * hv);
          }
--         
+       }
+@@ -200,22 +200,22 @@ void testcaseCYL05(Config* conf, RealView4D &fn) {
+         for(int ix = dom->local_nxmin_[0]; ix < dom->local_nxmax_[0]; ix++) {
+           float64 xx = y;
+           float64 vv = vy;
+-                                                                                
 +
-         _fn(i0, i1end, i2, i3) = fnend * sqrt3;
-         #if defined( LONG_ENOUGH_BUFFER )
-           for(int nn = i1end - 1; nn >= i1start; nn--) {
-diff --git a/miniapps/vlp4d_mpi/stdpar/Types.hpp b/miniapps/vlp4d_mpi/stdpar/Types.hpp
-index ea3a952..bba69b9 100644
---- a/miniapps/vlp4d_mpi/stdpar/Types.hpp
-+++ b/miniapps/vlp4d_mpi/stdpar/Types.hpp
+           float64 hv = 0.0;
+           float64 hx = 0.0;
+-                                                                                                    
++
+           if((vv <= cc + rc) && (vv >= cc - rc)) {
+             hv = cos(PERIOD * ((vv - cc) / rc));
+           } else if((vv <= -cc + rc) && (vv >= -cc - rc)) {
+             hv = -cos(PERIOD * ((vv + cc) / rc));
+           }
+-                                                                                                              
++
+           if((xx <= cc + rc) && (xx >= cc - rc)) {
+             hx = cos(PERIOD * ((xx - cc) / rc));
+           } else if((xx <= -cc + rc) && (xx >= -cc - rc)) {
+             hx = -cos(PERIOD * ((xx + cc) / rc));
+           }
+-                                                                                                                                                                
++
+           fn(ix, iy, ivx, ivy) = AMPLI * hx * hv;
+         }
+       }
+@@ -230,12 +230,12 @@ void testcaseSLD10(Config* conf, RealView4D &fn) {
+     for(int ivx = dom->local_nxmin_[2]; ivx <= dom->local_nxmax_[2]; ivx++) {
+       float64 vy = dom->minPhy_[3] + ivy * dom->dx_[3];
+       float64 vx = dom->minPhy_[2] + ivx * dom->dx_[2];
+-                                        
++
+       for(int iy = dom->local_nxmin_[1]; iy <= dom->local_nxmax_[1]; iy++) {
+         float64 y = dom->minPhy_[1] + iy * dom->dx_[1];
+         for(int ix = dom->local_nxmin_[0]; ix <= dom->local_nxmax_[0]; ix++) {
+           float64 x = dom->minPhy_[0] + ix * dom->dx_[0];
+-                                                                                    
++
+           float64 sum = (vx * vx + vy * vy);
+           fn(ix, iy, ivx, ivy) = (1. / (2 * M_PI)) * exp(-0.5 * (sum)) * (1 + 0.05 * (cos(0.5 * x) * cos(0.5 * y)));
+         }
+@@ -254,7 +254,7 @@ void testcaseTSI20(Config* conf, RealView4D &fn) {
+   float64 alphay  = 0.25;
+   float64 kx  = 0.2;
+   float64 ky  = 0.2;
+-                        
++
+   for(int ivy = dom->local_nxmin_[3]; ivy <= dom->local_nxmax_[3]; ivy++) {
+     for(int ivx = dom->local_nxmin_[2]; ivx <= dom->local_nxmax_[2]; ivx++) {
+       double vy = dom->minPhy_[3] + ivy * dom->dx_[3];
+@@ -263,7 +263,7 @@ void testcaseTSI20(Config* conf, RealView4D &fn) {
+         for(int ix = dom->local_nxmin_[0]; ix <= dom->local_nxmax_[0]; ix++) {
+           double yy = dom->minPhy_[1] + iy * dom->dx_[1];
+           double xx = dom->minPhy_[0] + ix * dom->dx_[0];
+-          fn(ix, iy, ivx, ivy) = 
++          fn(ix, iy, ivx, ivy) =
+             1./(4*M_PI*vthx*vthy)*
+             (1-alphax*sin(kx*xx)-alphay*sin(ky*yy))*
+             (exp(-.5*(pow((vx-vd)/vthx,2)+pow(vy/vthy,2)))+
+@@ -299,10 +299,10 @@ void testcase_ptest_check(Config* conf, Distrib &comm, RealView4D &halo_fn) {
+     for(int ivx = node->xmin_[2] - offm; ivx <= node->xmax_[2] + offp; ivx++) {
+       const int jvy = (dom->nxmax_[3] + ivy) % dom->nxmax_[3];
+       const int jvx = (dom->nxmax_[2] + ivx) % dom->nxmax_[2];
+-                                           
++
+       for(int iy = node->xmin_[1] - offm; iy <= node->xmax_[1] + offp; iy++) {
+         const int jy = (dom->nxmax_[1] + iy) % dom->nxmax_[1];
+-                                                                  
++
+         for(int ix = node->xmin_[0] - offm; ix <= node->xmax_[0] + offp; ix++) {
+           const int jx = (dom->nxmax_[0] + ix) % dom->nxmax_[0];
+           double fval = halo_fn(ix, iy, ivx, ivy);
+@@ -311,7 +311,7 @@ void testcase_ptest_check(Config* conf, Distrib &comm, RealView4D &halo_fn) {
+           if(fabs(diff) > .1) {
+             printf("[%d] Pb %d %d %d %d: %lf %lf %lf\n", comm.pid(), ivy, ivx, iy, ix, fval, ref, diff);
+           } else {
+-            //printf("[%d] OK %d %d %d %d: %lf %lf\n", comm.pid(),ivy,ivx,iy,ix, fval,ref);
++            printf("[%d] OK %d %d %d %d: %lf %lf\n", comm.pid(),ivy,ivx,iy,ix, fval,ref);
+           }
+         }
+       }
+@@ -320,14 +320,14 @@ void testcase_ptest_check(Config* conf, Distrib &comm, RealView4D &halo_fn) {
+ }
+ 
+ void init(const char *file, Config *conf, Distrib &comm, RealView4D &fn, RealView4D &fnp1, RealView4D &fn_tmp, Efield **ef, Diags **dg, Spline **spline, std::vector<Timer*> &timers) {
+-  Domain* dom = &conf->dom_; 
++  Domain* dom = &conf->dom_;
+   import(file, conf);
+   if(comm.master()) print(conf);
+ 
+   // Initialize communication manager
+   comm.createDecomposition(conf);
+   Urbnode *mynode = comm.node();
+-  
++
+   shape_nd<DIMENSION> shape_halo;
+   shape_nd<DIMENSION> nxmin_halo;
+   for(int i=0; i<DIMENSION; i++)
+@@ -349,23 +349,23 @@ void init(const char *file, Config *conf, Distrib &comm, RealView4D &fn, RealVie
+   // The functions testcase_ptest_init and testcase_ptest_check are present
+   // to check the good behavior of comm_exchange_halo. These calls are also
+   // there to initiate a first round of communication as a startup phase.
+-  
++
+   testcase_ptest_init(conf, comm, fn);
+   comm.exchangeHalo(conf, fn, timers);
+   testcase_ptest_check(conf, comm, fn);
+-  
++
+   timers[TimerEnum::pack]->reset();
+   timers[TimerEnum::comm]->reset();
+   timers[TimerEnum::unpack]->reset();
+-  
++
+   *ef = new Efield(conf, {dom->nxmax_[0], dom->nxmax_[1]});
+-  
++
+   // allocate and initialize diagnostics data structures
+   *dg = new Diags(conf);
+ 
+   // allocate
+   *spline = new Spline(conf);
+-  
++
+   // Initialize distribution function
+   fn = RealView4D("fn", shape_halo, nxmin_halo);
+   fn.fill(0);
+diff --git a/tests/stdpar/CMakeLists.txt b/tests/stdpar/CMakeLists.txt
+index 1429cb8..0fbe89e 100644
+--- a/tests/stdpar/CMakeLists.txt
++++ b/tests/stdpar/CMakeLists.txt
+@@ -11,6 +11,18 @@ if(BACKEND STREQUAL "CUDA")
+     target_link_options(google_tests PUBLIC -stdpar=gpu -cudalib=cufft,cublas)
+ elseif(BACKEND STREQUAL "OPENMP")
+     target_compile_options(google_tests PUBLIC -O3 -stdpar=multicore -mp)
++elseif(BACKEND STREQUAL "CLANG")
++    if(DEFINED STDPAR_PATH)
++        find_package(rocblas REQUIRED)
++        find_package(rocfft REQUIRED)
++        target_compile_options(google_tests PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++        target_link_libraries(google_tests PUBLIC roc::rocblas roc::rocfft)
++        target_link_options(google_tests PUBLIC -stdpar)
++    else()
++        target_compile_options(google_tests PUBLIC -march=native -fopenmp)
++        target_link_options(google_tests PUBLIC -fopenmp)
++        target_link_libraries(google_tests PUBLIC tbb)
++    endif()
+ else()
+     message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
+ endif()
+diff --git a/tests/stdpar/Types.hpp b/tests/stdpar/Types.hpp
+index 3344d9c..e30ef2d 100644
+--- a/tests/stdpar/Types.hpp
++++ b/tests/stdpar/Types.hpp
 @@ -9,7 +9,7 @@
  
  namespace stdex = std::experimental;
  
 -#if defined( _NVHPC_STDPAR_GPU )
-+#if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
++#if defined( _NVHPC_STDPAR_GPU ) || defined ( __STDPAR__ )
    #define SIMD_LOOP
    #define SIMD_WIDTH 1
    using default_layout = stdex::layout_left;
-@@ -57,13 +57,13 @@ using size_type = uint64; // Not working with uint32
+@@ -57,13 +57,13 @@ using size_type = uint32;
  template <size_t ND>
  using shape_nd = std::array<int, ND>;
  
@@ -477,25 +797,8 @@ index ea3a952..bba69b9 100644
  using View4D = View<ScalarType, stdex::dextents< size_type, 4 >, default_layout >;
  
  using RealView1D = View1D<Real>;
-diff --git a/tests/stdpar/CMakeLists.txt b/tests/stdpar/CMakeLists.txt
-index 1429cb8..01dec5e 100644
---- a/tests/stdpar/CMakeLists.txt
-+++ b/tests/stdpar/CMakeLists.txt
-@@ -11,6 +11,12 @@ if(BACKEND STREQUAL "CUDA")
-     target_link_options(google_tests PUBLIC -stdpar=gpu -cudalib=cufft,cublas)
- elseif(BACKEND STREQUAL "OPENMP")
-     target_compile_options(google_tests PUBLIC -O3 -stdpar=multicore -mp)
-+elseif(BACKEND STREQUAL "CLANG")
-+    find_package(rocblas REQUIRED)
-+    find_package(rocfft REQUIRED)
-+    target_compile_options(google_tests PUBLIC -O3 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
-+    target_link_libraries(google_tests PUBLIC roc::rocblas roc::rocfft)
-+    target_link_options(google_tests PUBLIC -stdpar)
- else()
-     message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
- endif()
 diff --git a/tests/stdpar/test_view.cpp b/tests/stdpar/test_view.cpp
-index b5935a5..482b147 100644
+index b5935a5..8ba5e75 100644
 --- a/tests/stdpar/test_view.cpp
 +++ b/tests/stdpar/test_view.cpp
 @@ -28,35 +28,37 @@ void set_inside_function(RealView2D shallow_copy_to_a_View) {
@@ -528,7 +831,7 @@ index b5935a5..482b147 100644
 -    for(int i=0; i<n; i++) {
 -      ASSERT_EQ( simple(i, j), reference(i, j) );
 -      ASSERT_NE( simple(i, j), 0.0 ); // Just to make sure simple has some value
-+#if !defined(__STDPAR__)
++#if !defined(__STDPAR__) && !defined(__GNUC__)
 +  void test_copy_constructor() {
 +    RealView2D simple("simple", 16, 16);
 +    RealView2D reference("reference", 16, 16);
@@ -578,7 +881,7 @@ index b5935a5..482b147 100644
 -TEST( VIEW, COPY_CONSTRUCTOR ) {
 -  test_copy_constructor();
 -}
-+#if !defined(__STDPAR__)
++#if !defined(__STDPAR__) && !defined(__GNUC__)
 +  TEST( VIEW, COPY_CONSTRUCTOR ) {
 +    test_copy_constructor();
 +  }
