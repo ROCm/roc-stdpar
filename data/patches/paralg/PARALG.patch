@@ -1,5 +1,5 @@
 diff --git a/heatEquation/Makefile b/heatEquation/Makefile
-index e6b4387..9d72699 100644
+index e6b4387..057c5b4 100644
 --- a/heatEquation/Makefile
 +++ b/heatEquation/Makefile
 @@ -1,11 +1,14 @@
@@ -7,14 +7,15 @@ index e6b4387..9d72699 100644
 +default: nompi_nv mpi_nv
  
  nompi_cpu: heatEquation.cpp
- 	g++ --std=c++17 -O3 -fopenmp -o heatEquation heatEquation.cpp -ltbb
+-	g++ --std=c++17 -O3 -fopenmp -o heatEquation heatEquation.cpp -ltbb
++	g++ --std=c++17 -O3 -fopenmp -o heatEquation_cpu heatEquation.cpp -ltbb
  
 -nompi_gpu: heatEquation.cpp
 +nompi_nv: heatEquation.cpp
  	nvc++ --std=c++17 -stdpar -O3 -fopenmp -o heatEquation heatEquation.cpp
  
 +nompi_clang: heatEquation.cpp
-+	${STDPAR_CXX} --std=c++17 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -O3 -fopenmp -o heatEquation heatEquation.cpp
++	${STDPAR_CXX} --std=c++17 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -O3 -fopenmp -o heatEquation_gpu heatEquation.cpp
 +
  # This assumes that mpicxx is a wrapper for g++, clang, or another CPU compiler.
  # You need to install Intel Threading Building Blocks ("apt install libtbb-dev")
@@ -52,12 +53,3 @@ index 5749fca..dbc312e 100644
          u_ptr, u_ptr + N*N, utmp_ptr,
          0., plus<double>(),
          [u_ptr, Dconst](double const& u_from, double& u_to) {
-@@ -276,7 +278,7 @@ int main(int argc, char* argv[]) {
-         if (image_frequency != -1 && num_iter % image_frequency == 0) {
-             write_to_bmp(N, u_ptr, num_image++, -1., 1.);
-         }
--    } 
-+    }
- 
-     return 0;
- }

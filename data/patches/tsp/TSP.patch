@@ -1,34 +1,20 @@
-diff --git a/.gitignore b/.gitignore
-index cba7efc..86e2e4e 100644
---- a/.gitignore
-+++ b/.gitignore
-@@ -1 +1,6 @@
- a.out
-+stdpar/tsp_clang_stdpar_gpu
-+.vscode/settings.json
-+.gitignore
-+
-+stdpar/tsp_clang_stdpar_cpu
 diff --git a/stdpar/Makefile b/stdpar/Makefile
-index 96b6d9d..6c31038 100644
+index 96b6d9d..82929ee 100644
 --- a/stdpar/Makefile
 +++ b/stdpar/Makefile
-@@ -30,11 +30,21 @@ tsp_pgi_stdpar_gpu: tsp.cpp tsp_utils.h route_cost.h route_iterator.h counting_i
- # Intel OneAPI using TBB under the hood
- #
+@@ -32,9 +32,19 @@ tsp_pgi_stdpar_gpu: tsp.cpp tsp_utils.h route_cost.h route_iterator.h counting_i
  tsp_dpcpp_stdpar_cpu: tsp_oneapi.cpp tsp_utils.h route_cost.h route_iterator.h counting_iterator.h
--	dpcpp -O3 -std=c++17 -ferror-limit=3 $< -o $@ -L${TBB_LIB} -ltbb 
-+	dpcpp -O3 -std=c++17 -ferror-limit=3 $< -o $@ -L${TBB_LIB} -ltbb
+ 	dpcpp -O3 -std=c++17 -ferror-limit=3 $< -o $@ -L${TBB_LIB} -ltbb
  
 -all: tsp_gnu_stdpar_cpu tsp_pgi_stdpar_cpu
 +#
 +# Clang / LLVM Standard Parallelism using HIP on the ROCM toolchain
 +#
 +tsp_clang_stdpar_cpu: tsp.cpp tsp_utils.h route_cost.h route_iterator.h counting_iterator.h
-+	${STDPAR_CXX} -O3 -march=native -std=c++17 $< -o $@ -L${TBB_LIB} -ltbb
++	${STDPAR_CXX} -O3 -march=native -std=c++17 -fopenmp-simd $< -o $@ -L${TBB_LIB} -ltbb
 +
 +tsp_clang_stdpar_gpu: tsp.cpp tsp_utils.h route_cost.h route_iterator.h counting_iterator.h
-+	${STDPAR_CXX} -O3 -march=native -std=c++17 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -DHIP_STDPAR $< -o $@
++	${STDPAR_CXX} -O3 -march=native -std=c++17 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} $< -o $@
 +
 +all: tsp_gnu_stdpar_cpu tsp_pgi_stdpar_cpu tsp_clang_stdpar_cpu
  
@@ -38,21 +24,6 @@ index 96b6d9d..6c31038 100644
  	\rm -f tsp_dpcpp_stdpar_cpu
 +	\rm -f tsp_clang_stdpar_cpu tsp_clang_stdpar_gpu
 \ No newline at end of file
-diff --git a/stdpar/route_iterator.h b/stdpar/route_iterator.h
-index 1f030d5..b6be4cb 100644
---- a/stdpar/route_iterator.h
-+++ b/stdpar/route_iterator.h
-@@ -72,7 +72,9 @@ route_iterator<N>::route_iterator(uint64_t route_id)
-   : m_route_id(route_id),
-     m_i(0)
- {
--  assert(m_route_id < factorial(N));
-+  #ifndef HIP_STDPAR // Temporary workaround.
-+    assert(m_route_id < factorial(N));
-+  #endif
- 
-   // invalid value
-   for (int k=0; k<N; ++k)
 diff --git a/stdpar/tsp.cpp b/stdpar/tsp.cpp
 index 45864ce..fa52ce3 100644
 --- a/stdpar/tsp.cpp

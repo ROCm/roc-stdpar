@@ -1,24 +1,24 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 5cb9198..2cd8160 100644
+index 5cb9198..91fee0f 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -156,8 +156,8 @@ endif()
- # TODO: This should be done only on demand
+@@ -157,7 +157,7 @@ endif()
  add_subdirectory( extern/googlebenchmark )
  
--set( TRACCC_STDPAR_BACKEND "gpu" CACHE STRING 
+ set( TRACCC_STDPAR_BACKEND "gpu" CACHE STRING
 -"Define the backend to use for C++ Parallel Algorithms (gpu|multicore|none)")
-+set( TRACCC_STDPAR_BACKEND "gpu" CACHE STRING
 +"Define the backend to use for C++ Parallel Algorithms (gpu|multicore|clang|none)")
  # Setup the flag for stdpar compilation based on selected backend
  if(${TRACCC_STDPAR_BACKEND} MATCHES "gpu")
    set( TRACCC_STDPAR_BACKEND_FLAG "-stdpar=gpu")
-@@ -165,8 +165,10 @@ elseif(${TRACCC_STDPAR_BACKEND} MATCHES "multicore")
+@@ -165,8 +165,12 @@ elseif(${TRACCC_STDPAR_BACKEND} MATCHES "multicore")
    set( TRACCC_STDPAR_BACKEND_FLAG "-stdpar=multicore")
  elseif(${TRACCC_STDPAR_BACKEND} MATCHES "none")
    set( TRACCC_STDPAR_BACKEND_FLAG "-nostdpar")
 +elseif(${TRACCC_STDPAR_BACKEND} MATCHES "clang")
-+  set( TRACCC_STDPAR_BACKEND_FLAG "-stdpar")
++  if (DEFINED TRACCC_STDPAR_PATH)
++   set( TRACCC_STDPAR_BACKEND_FLAG "-stdpar")
++  endif ()
  else()
 -  message(FATAL_ERROR "The backend for C++ Parallel Algorithms is unkown. Choose one of the following values: gpu|multicore|none")
 +  message(FATAL_ERROR "The backend for C++ Parallel Algorithms is unkown. Choose one of the following values: gpu|multicore|clang|none")
@@ -26,7 +26,7 @@ index 5cb9198..2cd8160 100644
  
  # option for algebra plugins (ARRAY EIGEN SMATRIX VC VECMEM)
 diff --git a/benchmarks/stdpar/CMakeLists.txt b/benchmarks/stdpar/CMakeLists.txt
-index c82238b..0cf4f83 100644
+index c82238b..4164b85 100644
 --- a/benchmarks/stdpar/CMakeLists.txt
 +++ b/benchmarks/stdpar/CMakeLists.txt
 @@ -2,8 +2,10 @@ cmake_minimum_required(VERSION 3.14)
@@ -42,77 +42,53 @@ index c82238b..0cf4f83 100644
  
  traccc_add_executable( benchmark_stdpar_cca "stdpar_cca.cpp"
      LINK_LIBRARIES traccc::core traccc::io traccc_benchmarks_common
-@@ -11,4 +13,10 @@ traccc_add_executable( benchmark_stdpar_cca "stdpar_cca.cpp"
+@@ -11,4 +13,15 @@ traccc_add_executable( benchmark_stdpar_cca "stdpar_cca.cpp"
  
  set (LIB "traccc_benchmark_stdpar_cca")
  target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
+-target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${LIB} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
-+endif ()
- target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
-+if (TRACCC_STDPAR_BACKEND MATCHES "clang")
++    if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
++        target_compile_options( ${LIB} PRIVATE
++            ${TRACCC_STDPAR_BACKEND_FLAG}
++            --stdpar-path=${TRACCC_STDPAR_PATH}
++            --offload-arch=${TRACCC_STDPAR_TARGET})
++        target_link_options( ${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++    else ()
++        target_compile_options(${LIB} PRIVATE -march=native -fopenmp-simd)
++    endif ()
 +    target_link_libraries(${LIB} PRIVATE tbb)
 +endif ()
+\ No newline at end of file
 diff --git a/device/stdpar/CMakeLists.txt b/device/stdpar/CMakeLists.txt
-index 5e2a15f..a2007c9 100644
+index 5e2a15f..8d7fcd0 100644
 --- a/device/stdpar/CMakeLists.txt
 +++ b/device/stdpar/CMakeLists.txt
-@@ -30,7 +30,13 @@ traccc_add_library( ${LIB} stdpar TYPE SHARED
-   "src/clusterization/component_connection_fastsv.cpp"
- )
+@@ -32,5 +32,18 @@ traccc_add_library( ${LIB} stdpar TYPE SHARED
  target_link_libraries( ${LIB}
--  PUBLIC traccc::core)
-+  PUBLIC traccc::core tbb)
+   PUBLIC traccc::core)
  
- target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
+-target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
+-target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${LIB} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
-+endif ()
- target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
-+if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_link_libraries(${LIB} PRIVATE tbb)
++  if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
++    target_compile_options( ${LIB} PRIVATE
++        ${TRACCC_STDPAR_BACKEND_FLAG}
++        --stdpar-path=${TRACCC_STDPAR_PATH}
++        --offload-arch=${TRACCC_STDPAR_TARGET})
++    target_link_options( ${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++  else ()
++    target_compile_options(${LIB} PRIVATE -march=native -fopenmp-simd)
++  endif ()
++  target_link_libraries(${LIB} PRIVATE tbb)
++else ()
++  target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++  target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +endif ()
 diff --git a/device/stdpar/include/traccc/stdpar/clusterization/clusterization_algorithm.hpp b/device/stdpar/include/traccc/stdpar/clusterization/clusterization_algorithm.hpp
 index 18e9ccd..fe33981 100644
 --- a/device/stdpar/include/traccc/stdpar/clusterization/clusterization_algorithm.hpp
 +++ b/device/stdpar/include/traccc/stdpar/clusterization/clusterization_algorithm.hpp
-@@ -43,7 +43,7 @@ class clusterization_algorithm
-     // pass the timer as nullptr to detect when none is passed, marks a non-breaking code extension
-     output_type operator()(
-         const cell_container_types::host& cells_per_event) const override {
--        
-+
-         return this->operator()(cells_per_event, nullptr);
-     }
- 
-@@ -60,7 +60,7 @@ class clusterization_algorithm
-         for(int i=0; i < nbr_of_modules; i++) {
-           data_header_array[i] = cells_per_event.get_headers().at(i);
-           data_items_array_sizes[i] = vecmem_items[i].size();
--          data_items_array[i] = new cell[vecmem_items[i].size()]; 
-+          data_items_array[i] = new cell[vecmem_items[i].size()];
-           for(int j=0; j < vecmem_items[i].size(); j++) {
-             data_items_array[i][j] = vecmem_items[i][j];
-           }
-@@ -74,14 +74,14 @@ class clusterization_algorithm
-         unsigned int* output_num_measurments_array = new unsigned int[nbr_of_modules];
- 
-         // init temporary structure in unified memory to prevent memory space problems when created within stdpar loop
--        cluster_element** cluster_container = new cluster_element*[nbr_of_modules]; 
--        
--        // TODO: should not be necessary, but it is as the arrays can't be initialized within stdpar loop. Default constructs way to many measurements. 
-+        cluster_element** cluster_container = new cluster_element*[nbr_of_modules];
-+
-+        // TODO: should not be necessary, but it is as the arrays can't be initialized within stdpar loop. Default constructs way to many measurements.
-         // init the output_items_array to welcome in the worst case as many measurements as there are activations in the module
-         for(int i=0; i < nbr_of_modules; i++){
-           const unsigned int nbr_of_activations = cells_per_event.at(i).items.size();
-           output_items_array[i] = new measurement[nbr_of_activations];
--          cluster_container[i] =  new cluster_element[nbr_of_activations]; 
-+          cluster_container[i] =  new cluster_element[nbr_of_activations];
-           for(int j=0; j < nbr_of_activations; j++){
-             cluster_container[i][j].items = new cell[nbr_of_activations]; // TODO: could also be set to `nbr_of_activations-j` to slightly reduce memory usage
-           }
 @@ -95,6 +95,7 @@ class clusterization_algorithm
          /*
           * Execute the CCA algorithm
@@ -121,52 +97,6 @@ index 18e9ccd..fe33981 100644
          std::for_each_n(std::execution::par, counting_iterator(0), nbr_of_modules, [=](unsigned int i){
            unsigned int num_clusters = 0;
  
-@@ -106,7 +107,7 @@ class clusterization_algorithm
-           mt->operator()(cluster_container[i], module, num_clusters, output_items_array[i]);
-           // The algorithmnic code part: end
- 
--          output_header_array[i] = module; 
-+          output_header_array[i] = module;
-           output_num_measurments_array[i] = num_clusters;
-         });
- 
-@@ -125,7 +126,7 @@ class clusterization_algorithm
-         delete[] data_header_array;
-         delete[] data_items_array_sizes;
-         delete[] data_items_array;
--        
-+
-         /*
-          * Register elpased time as iteration duration in the benchmark state for this iteration.
-          */
-diff --git a/device/stdpar/include/traccc/stdpar/clusterization/component_connection_sparseccl.hpp b/device/stdpar/include/traccc/stdpar/clusterization/component_connection_sparseccl.hpp
-index 1043337..2644ca6 100644
---- a/device/stdpar/include/traccc/stdpar/clusterization/component_connection_sparseccl.hpp
-+++ b/device/stdpar/include/traccc/stdpar/clusterization/component_connection_sparseccl.hpp
-@@ -52,20 +52,20 @@ class component_connection_sparseccl
-         // Run the algorithm
-         unsigned int* cluster_sizes = new unsigned int[number_of_cells]{}; // initialize values at 0
-         unsigned int *connected_cells = new unsigned int[number_of_cells];
--        
-+
-         detail::sparse_ccl(cells, connected_cells, number_of_cells,
-                            num_clusters, cluster_sizes);
- 
-         for(int i = 0; i < num_clusters; i++){
-           clusters[i].header.module = module.module;
-           clusters[i].header.placement = module.placement;
--          clusters[i].header.pixel = module.pixel;          
-+          clusters[i].header.pixel = module.pixel;
-           clusters[i].items_size = 0; // use it as index when filling the items array later, will correspond at the end to cluster_sizes[i]
-         }
- 
-         for(int i = 0; i < number_of_cells; i++){
-           // get the cluster label info for the current cell
--          unsigned int k = connected_cells[i]; 
-+          unsigned int k = connected_cells[i];
-           // assign add the cell to the cluster, and increase the current index for this cluster
-           clusters[k].items[clusters[k].items_size++] = cells[i];
-         }
 diff --git a/device/stdpar/include/traccc/stdpar/clusterization/measurement_creation.hpp b/device/stdpar/include/traccc/stdpar/clusterization/measurement_creation.hpp
 index d0fd81c..d90fc27 100644
 --- a/device/stdpar/include/traccc/stdpar/clusterization/measurement_creation.hpp
@@ -182,78 +112,10 @@ index d0fd81c..d90fc27 100644
  }
  
  inline vector2 get_pitch(cell_module module) {
-@@ -137,7 +137,7 @@ struct measurement_creation
- 
-             // Get the cluster id for this module
- 
--            // Calculate the cluster properties      
-+            // Calculate the cluster properties
-             calc_cluster_properties(clusters[i].items, clusters[i].items_size, module, mean,
-                                                           var, totalWeight);
- 
 diff --git a/device/stdpar/src/clusterization/component_connection_fastsv.cpp b/device/stdpar/src/clusterization/component_connection_fastsv.cpp
 index c5214d8..382b73a 100644
 --- a/device/stdpar/src/clusterization/component_connection_fastsv.cpp
 +++ b/device/stdpar/src/clusterization/component_connection_fastsv.cpp
-@@ -52,7 +52,7 @@ struct ccl_partition {
- };
- 
- /*
-- * Convenience structure to work with flattened data arrays instead of 
-+ * Convenience structure to work with flattened data arrays instead of
-  * an array/vector of cells.
-  */
- struct cell_container {
-@@ -65,7 +65,7 @@ struct cell_container {
- };
- 
- /*
-- * Convenience structure to work with flattened data arrays instead of 
-+ * Convenience structure to work with flattened data arrays instead of
-  * an array/vector of measures.
-  */
- struct measurement_container {
-@@ -85,7 +85,7 @@ void print_partitions(std::vector<details::ccl_partition> partitions){
-   std::cout << "---------------------------" << std::endl;
-   std::cout << "The current partitions" << std::endl;
-   std::cout << "---------------------------" << std::endl;
--  std::for_each_n(counting_iterator(0), partitions.size(), 
-+  std::for_each_n(counting_iterator(0), partitions.size(),
-     [=](unsigned int i){;
-     std::cout << "Partition " << i << std::endl;
-     std::cout << partitions.at(i) << std::endl;
-@@ -93,16 +93,16 @@ void print_partitions(std::vector<details::ccl_partition> partitions){
-   });
- }
- 
--void print_cells_in_partitions(std::vector<details::ccl_partition> partitions, 
-+void print_cells_in_partitions(std::vector<details::ccl_partition> partitions,
-                                channel_id *c0, channel_id *c1){
-   std::cout << "---------------------------" << std::endl;
-   std::cout << "Cells per partition" << std::endl;
-   std::cout << "---------------------------" << std::endl;
--  std::for_each_n(counting_iterator(0), partitions.size(), 
-+  std::for_each_n(counting_iterator(0), partitions.size(),
-     [=](unsigned int i){;
-     std::cout << "Partition " << i << std::endl;
-     std::cout << "[ ";
--    std::for_each_n(counting_iterator(partitions[i].start), partitions[i].size, 
-+    std::for_each_n(counting_iterator(partitions[i].start), partitions[i].size,
-       [=](unsigned int j){
-       std::cout << "(" << c0[j] << "," << c1[j] << ") " ;
-     });
-@@ -121,9 +121,9 @@ void print_cells_in_partitions(std::vector<details::ccl_partition> partitions,
- void print_array_on_device(char *array_label, index_t *array, int size, unsigned short partition_id){
-   int max_buffer_size = 1000;
-   int max_chars_per_element = 5; // an index_t has never more than 5 digits
--  int n_elements = std::min(size, max_buffer_size/max_chars_per_element); 
-+  int n_elements = std::min(size, max_buffer_size/max_chars_per_element);
-   int spacer_width = 2; // corresponds to the length of ", "
--  int buffer_size = n_elements*max_chars_per_element + n_elements*spacer_width; 
-+  int buffer_size = n_elements*max_chars_per_element + n_elements*spacer_width;
- 
-   char *buf = new char[buffer_size];
-   char *pos = buf;
 @@ -152,8 +152,9 @@ inline bool is_adjacent(channel_id ac0, channel_id ac1, channel_id bc0,
      return p0 * p0 <= 1 && p1 * p1 <= 1;
  }
@@ -265,13 +127,7 @@ index c5214d8..382b73a 100644
                                  // Using auto for adjv because other definitions did not work.
                                  // Open for suggestions to improve this.
    /*
-@@ -213,13 +214,14 @@ inline void reduce_problem_cell(const cell_container& cells, index_t tid,
- }
- 
- /*
-- * Implementation of a simplified SV algorithm. 
-+ * Implementation of a simplified SV algorithm.
-  *
+@@ -218,8 +219,9 @@ inline void reduce_problem_cell(const cell_container& cells, index_t tid,
   * The implementation corresponds to Algorithm 1 of the following paper:
   * https://epubs.siam.org/doi/pdf/10.1137/1.9781611976137.5
   */
@@ -282,149 +138,6 @@ index c5214d8..382b73a 100644
    /*
     * The algorithm finishes if an iteration leaves the arrays unchanged.
     * This varible will be set if a change is made, and dictates if another
-@@ -240,7 +242,7 @@ void fast_sv_1(index_t* f, index_t* gf, unsigned char *adjc,
-      * their cluster ID if it is lower than our, essentially merging
-      * the two together.
-      */
--    std::for_each_n(counting_iterator(0), size, 
-+    std::for_each_n(counting_iterator(0), size,
-       [=](unsigned int i){
-         for (unsigned char k = 0; k < adjc[i]; ++k) {
-           index_t q = gf[adjv[i][k]];
-@@ -257,7 +259,7 @@ void fast_sv_1(index_t* f, index_t* gf, unsigned char *adjc,
-      * allows us to look at any shortcuts in the cluster IDs that we
-      * can merge without adjacency information.
-      */
--    std::for_each_n(counting_iterator(0), size, 
-+    std::for_each_n(counting_iterator(0), size,
-       [=](unsigned int i){
-         if (f[i] > gf[i]) {
-           f[i] = gf[i];
-@@ -268,7 +270,7 @@ void fast_sv_1(index_t* f, index_t* gf, unsigned char *adjc,
-      * Update the array for the next generation, keeping track of any
-      * changes we make.
-      */
--    std::for_each_n(counting_iterator(0), size, 
-+    std::for_each_n(counting_iterator(0), size,
-       [=](unsigned int i){
-         if (gf[i] != f[f[i]]) {
-           gf[i] = f[f[i]];
-@@ -320,7 +322,7 @@ void fast_sv_2(index_t* f, index_t* f_next, unsigned char adjc[],
-          * grandparents of adjacent cells and copy cluster ID if it
-          * is lower than our, essentially merging the two together.
-          */
--        std::for_each_n(counting_iterator(0), size, 
-+        std::for_each_n(counting_iterator(0), size,
-           [=](unsigned int i){
-             for (unsigned char k = 0; k < adjc[i]; ++k) {
-               index_t q = f[f[adjv[i][k]]];
-@@ -337,7 +339,7 @@ void fast_sv_2(index_t* f, index_t* f_next, unsigned char adjc[],
-          * The second stage performs aggressive hooking, during which each
-          * cell might be hooked to the grand parent of an adjacent cell.
-          */
--        std::for_each_n(counting_iterator(0), size, 
-+        std::for_each_n(counting_iterator(0), size,
-           [=](unsigned int i){
-             for (unsigned char k = 0; k < adjc[i]; ++k) {
-                 index_t q = f[f[adjv[i][k]]];
-@@ -354,7 +356,7 @@ void fast_sv_2(index_t* f, index_t* f_next, unsigned char adjc[],
-          * allows us to look at any shortcuts in the cluster IDs that we
-          * can merge without adjacency information.
-          */
--        std::for_each_n(counting_iterator(0), size, 
-+        std::for_each_n(counting_iterator(0), size,
-           [=](unsigned int i){
-             if (f[f[i]] < f_next[i]) {
-                 f_next[i] = f[f[i]];
-@@ -365,7 +367,7 @@ void fast_sv_2(index_t* f, index_t* f_next, unsigned char adjc[],
-         /*
-          * Update the array for the next generation.
-          */
--        std::for_each_n(counting_iterator(0), size, 
-+        std::for_each_n(counting_iterator(0), size,
-           [=](unsigned int i){
-             f[i] = f_next[i];
-         });
-@@ -414,7 +416,7 @@ void simplified_sv(index_t* f, index_t* f_next, unsigned char adjc[],
-          * cluster roots and copy their cluster ID if it is lower than our,
-          * essentially merging the two together.
-          */
--        std::for_each_n(counting_iterator(0), size, 
-+        std::for_each_n(counting_iterator(0), size,
-           [=](unsigned int i){
-             if (f[i] == f[f[i]]) {  // only perform for roots of clusters
-                 for (unsigned char k = 0; k < adjc[i]; ++k) {
-@@ -430,7 +432,7 @@ void simplified_sv(index_t* f, index_t* f_next, unsigned char adjc[],
-         /*
-          * Update the array for the next stage of the iteration.
-          */
--        std::for_each_n(counting_iterator(0), size, 
-+        std::for_each_n(counting_iterator(0), size,
-           [=](unsigned int i){
-             f[i] = f_next[i];
-         });
-@@ -440,7 +442,7 @@ void simplified_sv(index_t* f, index_t* f_next, unsigned char adjc[],
-          * allows us to look at any shortcuts in the cluster IDs that we
-          * can merge without adjacency information.
-          */
--        std::for_each_n(counting_iterator(0), size, 
-+        std::for_each_n(counting_iterator(0), size,
-           [=](unsigned int i){
-             if (f[f[i]] < f[i]) {
-                 f_next[i] = f[f[i]];
-@@ -451,7 +453,7 @@ void simplified_sv(index_t* f, index_t* f_next, unsigned char adjc[],
-         /*
-          * Update the array for the next generation.
-          */
--        std::for_each_n(counting_iterator(0), size, 
-+        std::for_each_n(counting_iterator(0), size,
-           [=](unsigned int i){
-             f[i] = f_next[i];
-         });
-@@ -474,12 +476,12 @@ void aggregate_clusters(const cell_container &cells,
-   /*
-    * Keep track of the number of clusters already processed to properly index them in the output container.
-    */
--  unsigned int *cluster_index = new unsigned int(0);                               
-+  unsigned int *cluster_index = new unsigned int(0);
- 
-   /*
-    * Iterate over every cell in the partition and perform aggregation once per cluster.
-    */
--  std::for_each_n(counting_iterator(0), size, 
-+  std::for_each_n(counting_iterator(0), size,
-     [=](unsigned int i){
-       /*
-        * If and only if the value in the work arrays is equal to the index
-@@ -542,8 +544,8 @@ void aggregate_clusters(const cell_container &cells,
-          */
-         (*cluster_index)++;
-       }
--  });     
--  
-+  });
-+
-   /*
-    * Mandatory clean up of memory on the heap.
-    */
-@@ -554,7 +556,7 @@ void aggregate_clusters(const cell_container &cells,
-  * Function that organizes the parallel execution of the algotrithm.
-  */
- void fast_sv_kernel(
--    const cell_container container, 
-+    const cell_container container,
-     const std::vector<details::ccl_partition> *partitions,
-     measurement_container* _out_ctnr,
-     const cc_algorithm selected_algorithm) {
-@@ -563,7 +565,7 @@ void fast_sv_kernel(
-    */
-   if(partitions->size() == 0) return;
-   /*
--   * Create a local data pointer to access the data in the array of the 
-+   * Create a local data pointer to access the data in the array of the
-    * vector from within the parallel algorithm.
-    */
-   const details::ccl_partition *p = partitions->data();
 @@ -571,7 +573,7 @@ void fast_sv_kernel(
    /*
     * Start running the work in different kernels using std par.
@@ -434,134 +147,97 @@ index c5214d8..382b73a 100644
      [=](unsigned int i){
      /*
       * Seek the correct cell region in the input data. Again, this is all a
-@@ -602,13 +604,13 @@ void fast_sv_kernel(
-     /*
-      * This loop initializes the adjacency cache, which essentially
-      * translates the sparse CCL problem into a graph CCL problem which we
--     * can tackle with well-studied algorithms. 
-+     * can tackle with well-studied algorithms.
-      */
--    std::for_each_n(counting_iterator(0), cells.size, 
-+    std::for_each_n(counting_iterator(0), cells.size,
-       [=](unsigned int j){
-         reduce_problem_cell(cells, j, adjc, adjv);
-     });
--    
-+
-     /*
-      * These arrays are the meat of the pudding of this algorithm, and we
-      * will constantly be writing and reading from them.
-@@ -620,7 +622,7 @@ void fast_sv_kernel(
-      * At the start, the values of f and gf should be equal to the ID of
-      * the cell.
-      */
--    std::for_each_n(counting_iterator(0), cells.size, 
-+    std::for_each_n(counting_iterator(0), cells.size,
-       [=](unsigned int j){
-         f[j] = j;
-         gf[j] = j;
-@@ -645,7 +647,7 @@ void fast_sv_kernel(
-      * themself assigned as a parent.
-      */
-     // TODO: Verify that adding an execution policy here makes actually sense. -> It would, but it is currently not supported by nvc++
--    unsigned int number_of_clusters = std::count_if(std::execution::unseq, counting_iterator(0), counting_iterator(cells.size), 
-+    unsigned int number_of_clusters = std::count_if(std::execution::unseq, counting_iterator(0), counting_iterator(cells.size),
-       [=](unsigned int j){
-         return f[j] == j;
-     });
-@@ -703,7 +705,7 @@ std::vector<details::ccl_partition> partition(
-     geometry_id current_geometry = 0;
- 
-     /*
--     * We start at 0 since this is the origin of the local coordinate 
-+     * We start at 0 since this is the origin of the local coordinate
-      * system within a detector module.
-      */
-     channel_id last_mid = 0;
-@@ -713,12 +715,12 @@ std::vector<details::ccl_partition> partition(
-      */
-     for (std::size_t i = 0; i < n_cells; ++i) {
-         /*
--         * Create a new partition if an "empty" row is detected. A row 
--         * is considered "empty" if the channel1 values between two 
--         * consecutive cells have a difference > 1. Another criteria is if 
-+         * Create a new partition if an "empty" row is detected. A row
-+         * is considered "empty" if the channel1 values between two
-+         * consecutive cells have a difference > 1. Another criteria is if
-          * the cells of a new partition are starting to be treated.
-          * To prevent creating many small partitions, the current partition
--         * must have at least twice the size of threads per block. This 
-+         * must have at least twice the size of threads per block. This
-          * guarantees that each thread handles later at least two cells.
-          */
-         if ((channel1[i] > last_mid + 1 || module_id[i] != current_geometry) && size >= min_cells_per_partition) {
-@@ -804,14 +806,14 @@ component_connection_fastsv::output_type component_connection_fastsv::operator()
-     container.time = time.data();
-     container.module_id = module_id.data();
- 
--    /*  
-+    /*
-      * Run the partitioning algorithm sequentially.
-      */
--    std::vector<details::ccl_partition> partitions = 
-+    std::vector<details::ccl_partition> partitions =
-       details::partition(container.channel1, container.module_id, container.size, min_cells_per_partition);
--    
-+
-     /*
--     * Reserve space for the result of the algorithm. Currently, there is 
-+     * Reserve space for the result of the algorithm. Currently, there is
-      * enough space allocated that (in theory) each cell could be a single
-      * cluster, but this should not be the case with real experiment data.
-      */
 diff --git a/examples/run/stdpar/CMakeLists.txt b/examples/run/stdpar/CMakeLists.txt
-index dde5fa3..baba00b 100644
+index dde5fa3..99c31df 100644
 --- a/examples/run/stdpar/CMakeLists.txt
 +++ b/examples/run/stdpar/CMakeLists.txt
-@@ -8,17 +8,23 @@
- include( traccc-compiler-options-cpp )
- 
- traccc_add_executable( stdpar_sparseccl_example "stdpar_sparseccl.cpp"
--   LINK_LIBRARIES vecmem::core traccc::core traccc::io 
-+   LINK_LIBRARIES vecmem::core traccc::core traccc::io
+@@ -12,13 +12,39 @@ traccc_add_executable( stdpar_sparseccl_example "stdpar_sparseccl.cpp"
     traccc::options traccc::stdpar Boost::program_options)
  
  set (EXE_NAME "traccc_stdpar_sparseccl_example")
- target_compile_options(${EXE_NAME} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
+-target_compile_options(${EXE_NAME} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
+-target_link_options(${EXE_NAME} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${EXE_NAME} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
++  if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
++    target_compile_options( ${EXE_NAME} PRIVATE
++        ${TRACCC_STDPAR_BACKEND_FLAG}
++        --stdpar-path=${TRACCC_STDPAR_PATH}
++        --offload-arch=${TRACCC_STDPAR_TARGET})
++    target_link_options( ${EXE_NAME} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++  else ()
++    target_compile_options(${EXE_NAME} PRIVATE -march=native -fopenmp-simd)
++  endif ()
++  target_link_libraries(${EXE_NAME} PRIVATE tbb)
++else ()
++  target_compile_options(${EXE_NAME} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++  target_link_options(${EXE_NAME} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +endif ()
- target_link_options(${EXE_NAME} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
  
  traccc_add_executable( stdpar_fastsv_example "stdpar_fastsv.cpp"
--   LINK_LIBRARIES vecmem::core traccc::core traccc::io 
-+   LINK_LIBRARIES vecmem::core traccc::core traccc::io
+    LINK_LIBRARIES vecmem::core traccc::core traccc::io
     traccc::options traccc::stdpar Boost::program_options)
  
  set (EXE_NAME2 "traccc_stdpar_fastsv_example")
- target_compile_options(${EXE_NAME2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
+-target_compile_options(${EXE_NAME2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
+-target_link_options(${EXE_NAME2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${EXE_NAME2} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
++  if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
++    target_compile_options( ${EXE_NAME2} PRIVATE
++        ${TRACCC_STDPAR_BACKEND_FLAG}
++        --stdpar-path=${TRACCC_STDPAR_PATH}
++        --offload-arch=${TRACCC_STDPAR_TARGET})
++    target_link_options( ${EXE_NAME2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++  else ()
++    target_compile_options(${EXE_NAME2} PRIVATE -march=native -fopenmp-simd)
++  endif ()
++  target_link_libraries(${EXE_NAME2} PRIVATE tbb)
++else ()
++  target_compile_options(${EXE_NAME2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++  target_link_options(${EXE_NAME2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +endif ()
- target_link_options(${EXE_NAME2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 diff --git a/tests/stdpar/CMakeLists.txt b/tests/stdpar/CMakeLists.txt
-index 166852c..697114c 100644
+index 166852c..164c74e 100644
 --- a/tests/stdpar/CMakeLists.txt
 +++ b/tests/stdpar/CMakeLists.txt
-@@ -15,9 +15,14 @@ traccc_add_test( stdpar_sparseccl "test_cca_sparseccl.cpp"
+@@ -14,10 +14,35 @@ traccc_add_test( stdpar_sparseccl "test_cca_sparseccl.cpp"
+                   traccc::core traccc::io traccc::stdpar)
  
  set (LIB "traccc_test_stdpar_fastsv")
- target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
+-target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
+-target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${LIB} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
++  if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
++    target_compile_options( ${LIB} PRIVATE
++        ${TRACCC_STDPAR_BACKEND_FLAG}
++        --stdpar-path=${TRACCC_STDPAR_PATH}
++        --offload-arch=${TRACCC_STDPAR_TARGET})
++    target_link_options( ${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++  else ()
++    target_compile_options(${LIB} PRIVATE -march=native -fopenmp-simd)
++  endif ()
++  target_link_libraries(${LIB} PRIVATE tbb)
++else ()
++  target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++  target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +endif ()
- target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
  
  set (LIB2 "traccc_test_stdpar_sparseccl")
- target_compile_options(${LIB2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
-+if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+    target_compile_options(${LIB2} PRIVATE --stdpar-path=${TRACCC_STDPAR_PATH} --offload-arch=${TRACCC_STDPAR_TARGET})
-+endif ()
- target_link_options(${LIB2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
+-target_compile_options(${LIB2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
+-target_link_options(${LIB2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 -                  
 \ No newline at end of file
++if (TRACCC_STDPAR_BACKEND MATCHES "clang")
++  if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
++    target_compile_options( ${LIB2} PRIVATE
++        ${TRACCC_STDPAR_BACKEND_FLAG}
++        --stdpar-path=${TRACCC_STDPAR_PATH}
++        --offload-arch=${TRACCC_STDPAR_TARGET})
++    target_link_options( ${LIB2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++  else ()
++    target_compile_options(${LIB2} PRIVATE -march=native -fopenmp-simd)
++  endif ()
++  target_link_libraries(${LIB2} PRIVATE tbb)
++else ()
++  target_compile_options(${LIB2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++  target_link_options(${LIB2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
++endif ()
