@@ -6,7 +6,8 @@ All measurements are taken via each application's built-in tests. No
 modifications to the testing protocols are done. We report data as is, retaining
 units; please consult each application's documentation for details on their
 benchmarks. No attempts are made to optimise any of the applications, they are
-used as is. No assessments are made in about the applications' optimality.
+used as is. No assessments are made about the applications' optimality, be it
+for the CPU or for the GPU.
 
 For all tables, the final column contains the GPU's positioning relative to the
 CPU:
@@ -105,6 +106,16 @@ directly.
 | SMALL  | 58               | 172              | 3                        |
 | MIDDLE | 19               | 214              | 11                       |
 | LARGE  | 17               | 194              | 11                       |
+
+## miniBUDE
+
+- [repo](https://github.com/UoB-HPC/miniBUDE)
+- [patch](../../data/patches/miniBUDE/MINIBUDE.patch)
+
+| Test   | A - CPU (GFLOPS) | B - GPU (GFLOPS) | B / A (higher is better) |
+|:------:|:----------------:|:----------------:|:------------------------:|
+| bm1    | 67               | 2108             | 31                       |
+| bm2    | 62               | 1906             | 30                       |
 
 ## `nbody-stdpar`
 
