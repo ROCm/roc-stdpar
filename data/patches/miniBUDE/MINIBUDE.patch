@@ -1,0 +1,55 @@
+diff --git a/src/main.cpp b/src/main.cpp
+index ddc6cde..21ddeac 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -100,7 +100,7 @@ template <typename N> struct SummaryStats {
+     sum = std::accumulate(ys.begin(), ys.end(), N(0));
+     mean = sum / ys.size();
+     variance =
+-        std::accumulate(ys.begin(), ys.end(), N(0), [&](auto acc, auto t) { return acc + std::pow(t - mean, 2); }) /
++        std::accumulate(ys.begin(), ys.end(), N(0), [&](auto acc, auto t) { return acc + std::pow(t - mean, 2.); }) /
+         ys.size();
+     stdDev = std::sqrt(variance);
+   }
+diff --git a/src/std-indices/model.cmake b/src/std-indices/model.cmake
+index 40b62f3..6de8ae7 100644
+--- a/src/std-indices/model.cmake
++++ b/src/std-indices/model.cmake
+@@ -19,6 +19,19 @@ register_flag_optional(NVHPC_OFFLOAD
+            ccall - Compile for all supported compute capabilities"
+         "")
+ 
++register_flag_optional(CLANG_OFFLOAD
++        "Enable offloading support (via the non-standard `-stdpar`) for
++         Clang/LLVM. The values are AMDGPU processors (https://www.llvm.org/docs/AMDGPUUsage.html#processors)
++         which will be passed in via `--offload-arch=` argument.
++
++         Example values are:
++           gfx906  - Compile for Vega20 GPUs
++           gfx908  - Compile for CDNA1 GPUs
++           gfx90a  - Compile for CDNA2 GPUs
++           gfx1030 - Compile for RDNA2 NV21 GPUs
++           gfx1100 - Compile for RDNA3 NV31 GPUs"
++        "")
++
+ register_flag_optional(USE_TBB
+         "Link against an in-tree oneTBB via FetchContent_Declare, see top level CMakeLists.txt for details."
+         "OFF")
+@@ -62,5 +75,17 @@ macro(setup)
+         register_append_link_flags(${NVHPC_FLAGS})
+     endif ()
+ 
++    if (CLANG_OFFLOAD)
++        set(CLANG_FLAGS
++                -stdpar
++                --stdpar-path=${CLANG_STDPAR_PATH}
++                --offload-arch=${CLANG_OFFLOAD})
++        if (NOT CLANG_OFFLOAD MATCHES "^gfx9")
++                list(APPEND CLANG_FLAGS --stdpar-interpose-alloc)
++        endif ()
++
++        register_append_cxx_flags(ANY ${CLANG_FLAGS})
++        register_append_link_flags(-stdpar)
++    endif ()
+ 
+ endmacro()
