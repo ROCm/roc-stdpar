@@ -75,7 +75,7 @@ index 4b98dd5..e503f4d 100644
 +    target_link_libraries(p2r_kokkos Kokkos::kokkos)             ## JLSE build
 +endif ()
 diff --git a/build.py b/build.py
-index 82c5b09..0d3f166 100755
+index 82c5b09..c5ae23e 100755
 --- a/build.py
 +++ b/build.py
 @@ -35,7 +35,7 @@ technologies = {
@@ -87,14 +87,16 @@ index 82c5b09..0d3f166 100755
          'cuda': ['nvc++','nvc++_x86']
      },
      "hip":{
-@@ -109,6 +109,11 @@ def compilationCommand(compiler, technology, backend, target, source, scanPoint,
+@@ -109,6 +109,13 @@ def compilationCommand(compiler, technology, backend, target, source, scanPoint,
      if compiler == "hipcc":
          cmd.extend(["hipcc","-Iinclude","-std=c++17"])
  
 +    if compiler == "clang":
 +        cmd.extend(["clang++", "-Wall", "-Isrc", "-O3", "-fopenmp-simd", "-march=native", "-std=c++17",'-lm',"-ltbb"])
 +    if compiler == "clang_gpu":
-+        cmd.extend([os.path.expandvars("$STDPAR_CXX"), "-Wall", "-Isrc", "-O3", "-march=native", "-std=c++17",'-lm',"-ltbb", "--stdpar", os.path.expandvars("--stdpar-path=$STDPAR_PATH"), os.path.expandvars("--offload-arch=$STDPAR_TARGET"), "--save-temps"])
++        cmd.extend([os.path.expandvars("$STDPAR_CXX"), "-Wall", "-Isrc", "-O3", "-march=native", "-std=c++17",'-lm',"-ltbb", "--stdpar", os.path.expandvars("--stdpar-path=$STDPAR_PATH"), os.path.expandvars("--offload-arch=$STDPAR_TARGET")])
++        if not os.path.expandvars("$STDPAR_TARGET").startswith("gfx9"):
++            cmd.append("--stdpar-interpose-alloc")
 +
      cmd.extend(["-o", target, source])
  
