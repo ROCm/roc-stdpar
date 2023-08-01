@@ -1,0 +1,387 @@
+diff --git a/FastCaloSimAnalyzer/CMakeLists.txt b/FastCaloSimAnalyzer/CMakeLists.txt
+index adcb4e8..9587d0c 100644
+--- a/FastCaloSimAnalyzer/CMakeLists.txt
++++ b/FastCaloSimAnalyzer/CMakeLists.txt
+@@ -12,6 +12,7 @@ cmake_policy(SET CMP0074 NEW)
+ # Set project
+ project(FastCaloSimAnalyzer VERSION 1.0.0)
+ 
++add_compile_options(-fcf-protection=none)
+ set(ENABLE_GPU OFF CACHE BOOL "Enable GPU")
+ set(RNDGEN_CPU OFF CACHE BOOL "Generate Random Numbers on CPU")
+ set(USE_STDPAR OFF CACHE BOOL "Use std::par")
+@@ -26,16 +27,24 @@ if ( USE_STDPAR )
+     if ( NOT RNDGEN_CPU )
+       message(FATAL_ERROR "when STDPAR_TARGET=cpu, RNDGEN_CPU must be ON")
+     endif()
++    if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+       set(STDPAR_DIRECTIVE "-nostdpar")
++    endif ()
+   elseif( ${STDPAR_TARGET} STREQUAL "gpu" )
++    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
++      set(STDPAR_DIRECTIVE "--stdpar")
++    else ()
+       set(STDPAR_DIRECTIVE "-stdpar=gpu")
++    endif ()
+   elseif( ${STDPAR_TARGET} STREQUAL "multicore" )
+     if ( USE_ATOMIC_ADD )
+       message(WARNING "when STDPAR_TARGET=multicore, USE_ATOMIC_ADD must be OFF")
+       message(WARNING "Setting USE_ATOMIC_ADD to OFF")
+       set ( USE_ATOMIC_ADD OFF )
+     endif()
++    if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+       set(STDPAR_DIRECTIVE "-stdpar=multicore")
++    endif ()
+   else()
+     message(FATAL_ERROR "unknown stdpar target ${STDPAR_TARGET}")
+   endif()
+diff --git a/FastCaloSimAnalyzer/FastCaloGpu/FastCaloGpu/gpuQ.h b/FastCaloSimAnalyzer/FastCaloGpu/FastCaloGpu/gpuQ.h
+index aff8f7c..d831c43 100644
+--- a/FastCaloSimAnalyzer/FastCaloGpu/FastCaloGpu/gpuQ.h
++++ b/FastCaloSimAnalyzer/FastCaloGpu/FastCaloGpu/gpuQ.h
+@@ -2,12 +2,18 @@
+   Copyright (C) 2002-2021 CERN for the benefit of the ATLAS collaboration
+ */
+ 
+-#include "driver_types.h"
++#if !defined(__STDPAR__)
++  #include "driver_types.h"
++#endif
+ 
+ #ifndef GPUQ_H
+ #define GPUQ_H
+ 
+-void gpu_assert( cudaError_t code, const char* file, const int line );
++#if defined(__STDPAR__)
++  void gpu_assert( hipError_t code, const char* file, const int line );
++#else
++  void gpu_assert( cudaError_t code, const char* file, const int line );
++#endif
+ 
+ #ifndef gpuQ
+ #  define gpuQ( ans )                                                                                                  \
+diff --git a/FastCaloSimAnalyzer/FastCaloGpu/src/CMakeLists.txt b/FastCaloSimAnalyzer/FastCaloGpu/src/CMakeLists.txt
+index 6ce1fc7..0d956e5 100644
+--- a/FastCaloSimAnalyzer/FastCaloGpu/src/CMakeLists.txt
++++ b/FastCaloSimAnalyzer/FastCaloGpu/src/CMakeLists.txt
+@@ -19,9 +19,13 @@ endif()
+ 
+ if(USE_STDPAR)
+   if ( ${STDPAR_TARGET} STREQUAL "gpu" )
++    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
++      set(FIND_CUDA OFF)
++    else ()
+       find_package(NVHPC REQUIRED COMPONENTS MATH)
+       set(FIND_CUDA ON)
+     endif()
++  endif ()
+ endif()
+ 
+ 
+@@ -31,10 +35,14 @@ if(FIND_CUDA)
+   set(CUDA_LIBRARIES PUBLIC  ${CUDA_LIBRARIES})
+ endif()
+ 
+-
+ # Sources
+ if(USE_STDPAR)
+-  set(FastCaloGpu_Srcs GeoLoadGpu.cxx KernelWrapper_sp.cxx gpuQ.cu Rand4Hits.cu Rand4Hits_sp.cxx )
++  set(FastCaloGpu_Srcs GeoLoadGpu.cxx KernelWrapper_sp.cxx  Rand4Hits_sp.cxx )
++  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
++    list(APPEND FastCaloGpu_Srcs gpuQ.cxx Rand4Hits.cxx)
++  else ()
++    list(APPEND FastCaloGpu_Srcs gpuQ.cu Rand4Hits.cu)
++  endif()
+ #  set(FastCaloGpu_Srcs gpuQ.cu CaloGpuGeneral.cxx  KernelWrapper.cu Rand4Hits.cu )
+ elseif(USE_KOKKOS)
+   set(FastCaloGpu_Srcs GeoLoadGpu.cxx KernelWrapper_kk.cxx )
+@@ -85,8 +93,9 @@ if(USE_KOKKOS)
+ endif()
+ 
+ if(USE_STDPAR)
+-  target_link_libraries(${FastCaloGpu_LIB} PUBLIC  ${CUDA_LIBRARIES} )
+   target_compile_definitions(${FastCaloGpu_LIB} PRIVATE -DUSE_STDPAR -DSTDPAR_TARGET=${STDPAR_TARGET} )
++  if (USE_CUDA)
++    target_link_libraries(${FastCaloGpu_LIB} PUBLIC  ${CUDA_LIBRARIES} )
+ 
+     #
+     ### should remove the "GNU" stuff when can build whole project with nvc++
+@@ -100,11 +109,12 @@ if(USE_STDPAR)
+       target_compile_options(${FastCaloGpu_LIB} PRIVATE $<$<COMPILE_LANG_AND_ID:CXX,NVHPC>: -cuda -g>)
+ 
+       target_include_directories(${FastCaloGpu_LIB} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${NVHPC_ROOT_DIR}/math_libs/${NVHPC_CUDA_VERSION}/include>)
+-    
++    endif()
++  else ()
++    target_compile_options(${FastCaloGpu_LIB} PUBLIC ${STDPAR_DIRECTIVE} --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_OFFLOAD_TARGET})
+   endif()
+ 
+-  target_link_options(${FastCaloGpu_LIB} PRIVATE ${STDPAR_DIRECTIVE})
+-
++  target_link_options(${FastCaloGpu_LIB} PUBLIC ${STDPAR_DIRECTIVE})
+ endif()
+ 
+ if(RNDGEN_CPU)
+diff --git a/FastCaloSimAnalyzer/FastCaloGpu/src/CaloGpuGeneral_sp.cxx b/FastCaloSimAnalyzer/FastCaloGpu/src/CaloGpuGeneral_sp.cxx
+index e12cb7b..a1c348d 100644
+--- a/FastCaloSimAnalyzer/FastCaloGpu/src/CaloGpuGeneral_sp.cxx
++++ b/FastCaloSimAnalyzer/FastCaloGpu/src/CaloGpuGeneral_sp.cxx
+@@ -9,7 +9,10 @@
+ #include "Rand4Hits.h"
+ #include "Hit.h"
+ #include "CountingIterator.h"
+-#include "nvToolsExt.h"
++#if __has_include("nvToolsExt.h")
++  #include "nvToolsExt.h"
++  #define USE_NV_TOOLS
++#endif
+ 
+ #define DO_ATOMIC_TESTS 0
+ 
+@@ -70,8 +73,10 @@ namespace CaloGpuGeneral_stdpar {
+ 
+   void simulate_clean(Chain0_Args& args) {
+ 
++    #if defined(USE_NV_TOOLS)
+       nvtxRangeId_t r;
+       if (!first) r = nvtxRangeStartA("sim_clean");
++    #endif
+ 
+     std::for_each_n(std::execution::par_unseq, counting_iterator(0), args.ncells,
+                     [=](unsigned int i) {
+@@ -80,7 +85,9 @@ namespace CaloGpuGeneral_stdpar {
+                     );
+ 
+     args.hitcells_ct[0] = 0;
++    #if defined(USE_NV_TOOLS)
+       if (!first) nvtxRangeEnd(r);
++    #endif
+ 
+   }
+ 
+@@ -88,9 +95,10 @@ namespace CaloGpuGeneral_stdpar {
+ 
+   void simulate_A( float E, int nhits, Chain0_Args args ) {
+ 
+-
++    #if defined(USE_NV_TOOLS)
+       nvtxRangeId_t r;
+       if (!first) r = nvtxRangeStartA("sim_A");
++    #endif
+ 
+     // std::cout << "sim_A: nhits: " << nhits << std::endl;
+ 
+@@ -109,8 +117,9 @@ namespace CaloGpuGeneral_stdpar {
+ 
+                   }
+                     );
+-    
++    #if defined(USE_NV_TOOLS)
+       if (!first) nvtxRangeEnd(r);
++    #endif
+ 
+   }
+ 
+@@ -118,8 +127,10 @@ namespace CaloGpuGeneral_stdpar {
+ 
+   void simulate_ct( Chain0_Args args ) {
+ 
++    #if defined(USE_NV_TOOLS)
+       nvtxRangeId_t r;
+       if (!first) r = nvtxRangeStartA("sim_ct");
++    #endif
+ 
+     std::for_each_n(std::execution::par_unseq, counting_iterator(0), args.ncells,
+                     [=](unsigned int i) {
+@@ -142,8 +153,9 @@ namespace CaloGpuGeneral_stdpar {
+ 
+                       }
+                     } );
+-    
++    #if defined(USE_NV_TOOLS)
+       if (!first) nvtxRangeEnd(r);
++    #endif
+   }
+ 
+   /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+@@ -169,15 +181,21 @@ namespace CaloGpuGeneral_stdpar {
+     auto t3 = std::chrono::system_clock::now();
+ 
+     // pass result back
++    #if defined(USE_NV_TOOLS)
+       nvtxRangeId_t r1,r2;
+       if (!first) r1 = nvtxRangeStartA("sim_cp_1");
++    #endif
+     args.ct = *args.hitcells_ct;
++    #if defined(USE_NV_TOOLS)
+       if (!first) {
+         nvtxRangeEnd(r1);
+         r2 = nvtxRangeStartA("sim_cp_2");
+       }
++    #endif
+     std::memcpy( args.hitcells_E_h, args.hitcells_E, args.ct * sizeof( Cell_E ));
++    #if defined(USE_NV_TOOLS)
+       if (!first) nvtxRangeEnd(r2);
++    #endif
+ 
+ 
+     auto t4 = std::chrono::system_clock::now();
+diff --git a/FastCaloSimAnalyzer/FastCaloGpu/src/GeoLoadGpu_sp.cxx b/FastCaloSimAnalyzer/FastCaloGpu/src/GeoLoadGpu_sp.cxx
+index 001c744..84ecfcc 100644
+--- a/FastCaloSimAnalyzer/FastCaloGpu/src/GeoLoadGpu_sp.cxx
++++ b/FastCaloSimAnalyzer/FastCaloGpu/src/GeoLoadGpu_sp.cxx
+@@ -4,7 +4,11 @@
+ 
+ #include "GeoLoadGpu.h"
+ #include "gpuQ.h"
++#if defined(__STDPAR__)
++#include <hip/hip_runtime.h>
++#else
+ #include "cuda_runtime.h"
++#endif
+ #include <cstring>
+ 
+ bool GeoLoadGpu::LoadGpu_sp() {
+@@ -22,6 +26,10 @@ bool GeoLoadGpu::LoadGpu_sp() {
+   cudaDeviceProp prop;
+   gpuQ( cudaGetDeviceProperties( &prop, 0 ) );
+   std::cout << "Executing on GPU: " << prop.name << std::endl;
++  #elif defined(__STDPAR__)
++  hipDeviceProp_t prop;
++  gpuQ( hipGetDeviceProperties( &prop, 0 ) );
++  std::cout << "Executing on GPU: " << prop.name << std::endl;
+   #endif
+ 
+   // Allocate Device memory for cells and copy cells as array
+diff --git a/FastCaloSimAnalyzer/FastCaloGpu/src/Rand4Hits.cu b/FastCaloSimAnalyzer/FastCaloGpu/src/Rand4Hits.cu
+index 2adee05..45f59f1 100644
+--- a/FastCaloSimAnalyzer/FastCaloGpu/src/Rand4Hits.cu
++++ b/FastCaloSimAnalyzer/FastCaloGpu/src/Rand4Hits.cu
+@@ -5,7 +5,9 @@
+ #include "Rand4Hits.h"
+ #include "gpuQ.h"
+ #include <iostream>
+-#include <curand.h>
++#if __has_include(<curand.h>)
++  #include <curand.h>
++#endif
+ 
+ #include "Rand4Hits_cpu.cxx"
+ 
+@@ -61,17 +63,27 @@ Rand4Hits::~Rand4Hits() {
+ 
+ #ifdef USE_STDPAR
+   if (!m_useCPU) {
++    #if defined(__STDPAR__)
++      gpuQ( hipFree( m_rand_ptr ) );
++    #else
+       gpuQ( cudaFree( m_rand_ptr ) );
++    #endif
+   }
+ #else
++  #if defined(__STDPAR__)
++    gpuq( hipFree( m_rand_ptr ) );
++  #else
+     gpuQ( cudaFree( m_rand_ptr ) );
++  #endif
+ #endif
+ 
+   if ( m_useCPU ) {
+     destroyCPUGen();
+   } else {
++    #if !defined(__STDPAR__)
+       CURAND_CALL( curandDestroyGenerator( *( (curandGenerator_t*)m_gen ) ) );
+       delete (curandGenerator_t*)m_gen;
++    #endif
+   }
+ };
+ 
+@@ -82,7 +94,9 @@ void Rand4Hits::rd_regen() {
+     gpuQ( cudaMemcpy( m_rand_ptr, m_rnd_cpu->data(), 3 * m_total_a_hits * sizeof( float ), cudaMemcpyHostToDevice ) );
+     #endif
+   } else {
++    #if !defined(__STDPAR__)
+     CURAND_CALL( curandGenerateUniform( *( (curandGenerator_t*)m_gen ), m_rand_ptr, 3 * m_total_a_hits ) );
++    #endif
+   }
+ };
+ 
+@@ -103,12 +117,14 @@ void Rand4Hits::create_gen( unsigned long long seed, size_t num, bool useCPU ) {
+     gpuQ( cudaMemcpy( f, m_rnd_cpu->data(), num * sizeof( float ), cudaMemcpyHostToDevice ) );
+ #endif
+   } else {
++    #if !defined(__STDPAR__)
+     gpuQ( cudaMalloc( &f, num * sizeof( float ) ) );
+     curandGenerator_t* gen = new curandGenerator_t;
+     CURAND_CALL( curandCreateGenerator( gen, CURAND_RNG_PSEUDO_DEFAULT ) );
+     CURAND_CALL( curandSetPseudoRandomGeneratorSeed( *gen, seed ) );
+     CURAND_CALL( curandGenerateUniform( *gen, f, num ) );
+     m_gen = (void*)gen;
++    #endif
+   }
+ 
+   m_rand_ptr = f;
+diff --git a/FastCaloSimAnalyzer/FastCaloGpu/src/gpuQ.cu b/FastCaloSimAnalyzer/FastCaloGpu/src/gpuQ.cu
+index 1c890eb..01b8747 100644
+--- a/FastCaloSimAnalyzer/FastCaloGpu/src/gpuQ.cu
++++ b/FastCaloSimAnalyzer/FastCaloGpu/src/gpuQ.cu
+@@ -5,9 +5,18 @@
+ #include "gpuQ.h"
+ #include <iostream>
+ 
++#if defined(__STDPAR__)
++void gpu_assert( hipError_t code, const char* file, const int line ) {
++  if ( code != hipSuccess ) {
++    std::cerr << "gpu_assert: " << hipGetErrorString( code ) << " " << file << " " << line << std::endl;
++    exit( code );
++  }
++}
++#else
+ void gpu_assert( cudaError_t code, const char* file, const int line ) {
+   if ( code != cudaSuccess ) {
+     std::cerr << "gpu_assert: " << cudaGetErrorString( code ) << " " << file << " " << line << std::endl;
+     exit( code );
+   }
+ }
++#endif
+diff --git a/FastCaloSimAnalyzer/FastCaloSimCommon/cmake/Helpers.cmake b/FastCaloSimAnalyzer/FastCaloSimCommon/cmake/Helpers.cmake
+index 58a9f4f..3360277 100644
+--- a/FastCaloSimAnalyzer/FastCaloSimCommon/cmake/Helpers.cmake
++++ b/FastCaloSimAnalyzer/FastCaloSimCommon/cmake/Helpers.cmake
+@@ -10,6 +10,19 @@ function(fcs_add_library)
+   if(USE_KOKKOS)
+     target_link_libraries(${ARGV0} Kokkos::kokkos)
+   endif()
++  if(USE_STDPAR)
++    target_compile_options(${ARGV0} PRIVATE ${STDPAR_DIRECTIVE})
++    target_link_options(${ARGV0} PRIVATE ${STDPAR_DIRECTIVE})
++    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
++      target_compile_options(
++        ${ARGV0} PRIVATE
++          --stdpar-path=${STDPAR_PATH}
++          --offload-arch=${STDPAR_OFFLOAD_TARGET})
++      if (NOT STDPAR_OFFLOAD_TARGET MATCHES "^gfx9")
++        target_compile_options(${ARGV0} PRIVATE --stdpar-interpose-alloc)
++      endif ()
++    endif ()
++  endif()
+   target_compile_definitions(${ARGV0} PRIVATE ${FCS_CommonDefinitions})
+   target_include_directories(${ARGV0} PRIVATE . ${CMAKE_SOURCE_DIR})
+ endfunction()
+@@ -71,6 +84,16 @@ function(fcs_make_task)
+   if(USE_STDPAR)
+     target_compile_options(${_target} PRIVATE ${STDPAR_DIRECTIVE})
+     target_link_options(${_target} PRIVATE ${STDPAR_DIRECTIVE})
++    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
++      target_compile_options(
++        ${_target} PRIVATE
++          --stdpar-path=${STDPAR_PATH}
++          --offload-arch=${STDPAR_OFFLOAD_TARGET}
++          -fcf-protection=none)
++      if (NOT STDPAR_OFFLOAD_TARGET MATCHES "^gfx9")
++        target_compile_options(${_target} PRIVATE --stdpar-interpose-alloc)
++      endif ()
++    endif ()
+   endif()
+ 
+   foreach(_dependency ${ARG_DEPENDENCY})
