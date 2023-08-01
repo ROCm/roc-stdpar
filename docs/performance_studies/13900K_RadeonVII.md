@@ -119,6 +119,9 @@ directly.
 
 ## `nbody-stdpar`
 
+- [repo](https://github.com/jbeisman/nbody-stdpar)
+- [patch](../../data/patches/nbody-stdpar/NBODY_STDPAR.patch)
+
 | Test         | A - CPU (ms) | B - GPU (ms) | A / B (higher is better) |
 |:------------:|:------------:|:------------:|:------------------------:|
 | 4096 bodies  | 2192         | 2943         | 0.7                      |
@@ -130,6 +133,27 @@ directly.
 - notes:
   - run parameterised with `Simulation duration == 100` and
     `Integration timestep == 0.1`
+
+## p2r-tests
+
+- [repo](https://github.com/cerati/p2r-tests)
+- [patch](../../data/patches/p2r-tests/P2R_TESTS.patch)
+
+| Test       | A - CPU (s) | B - GPU (s) | A / B (higher is better) |
+|:----------:|:------------:|:------------:|:------------------------:|
+| 8192 trks  | 3            | 3            | 1                        |
+| 16384 trks | 6            | 6            | 1                        |
+| 32768 trks | 14           | 12           | 1.16                     |
+| 65536 trks | 23           | 23           | 1                        |
+
+- notes:
+  - table records total time i.e. `setup time` + `tot time`
+  - `bsize = 64`
+  - other parameters kept at their default values:
+    - `nevts = 100`
+    - `smearing = 0.0001`
+    - `NITER = 5`
+    - `nlayer = 20`
 
 ## P3-miniapps
 
