@@ -1,4 +1,4 @@
 # LLVM
 
 - url: <https://github.com/llvm/llvm-project/>
-- branch: `main` at `7292d051a94032ea9ea56471ad40cc81696cca5b`
+- branch: `main` at `0058c92609a43079420668877c09948811e94d44`

@@ -386,7 +386,7 @@ index 000000000000..987ab659598a
 +4. Offload support might be extended to cases where the ``parallel_policy`` is
 +   used for some or all targets.
 diff --git a/clang/docs/index.rst b/clang/docs/index.rst
-index dd726a81eb3f..5c54a4c73c16 100644
+index 5453a19564b8..a7af522bee6e 100644
 --- a/clang/docs/index.rst
 +++ b/clang/docs/index.rst
 @@ -47,6 +47,7 @@ Using Clang as a Compiler
@@ -394,9 +394,9 @@ index dd726a81eb3f..5c54a4c73c16 100644
     OpenMPSupport
     SYCLSupport
 +   StdParSupport
+    HIPSupport
     HLSL/HLSLDocs
     ThinLTO
-    APINotes
 diff --git a/clang/include/clang/Basic/DiagnosticDriverKinds.td b/clang/include/clang/Basic/DiagnosticDriverKinds.td
 index 1b69324d073a..a4304868c9cd 100644
 --- a/clang/include/clang/Basic/DiagnosticDriverKinds.td
@@ -419,7 +419,7 @@ index 1b69324d073a..a4304868c9cd 100644
  def err_drv_no_hipspv_device_lib : Error<
    "cannot find HIP device library%select{| for %1}0; provide its path via "
 diff --git a/clang/include/clang/Basic/LangOptions.def b/clang/include/clang/Basic/LangOptions.def
-index f7ec0406f33e..6af1d7cf9465 100644
+index 007b3737f83e..188a8e20066c 100644
 --- a/clang/include/clang/Basic/LangOptions.def
 +++ b/clang/include/clang/Basic/LangOptions.def
 @@ -278,6 +278,8 @@ LANGOPT(SYCLIsHost        , 1, 0, "SYCL host compilation")
@@ -428,14 +428,14 @@ index f7ec0406f33e..6af1d7cf9465 100644
  LANGOPT(HIPUseNewLaunchAPI, 1, 0, "Use new kernel launching API for HIP")
 +LANGOPT(HIPStdPar, 1, 0, "Enable Standard Parallel Algorithm Acceleration for HIP (experimental)")
 +LANGOPT(HIPStdParInterposeAlloc, 1, 0, "Replace allocations / deallocations with HIP RT calls when Standard Parallel Algorithm Acceleration for HIP is enabled (Experimental)")
+ LANGOPT(OffloadUniformBlock, 1, 0, "Assume that kernels are launched with uniform block sizes (default true for CUDA/HIP and false otherwise)")
  
  LANGOPT(SizedDeallocation , 1, 0, "sized deallocation")
- LANGOPT(AlignedAllocation , 1, 0, "aligned allocation")
 diff --git a/clang/include/clang/Driver/Options.td b/clang/include/clang/Driver/Options.td
-index 229f6141c750..6c8d1ea2485a 100644
+index 3756b42da3b3..9d083371914c 100644
 --- a/clang/include/clang/Driver/Options.td
 +++ b/clang/include/clang/Driver/Options.td
-@@ -1059,6 +1059,21 @@ def rocm_path_EQ : Joined<["--"], "rocm-path=">, Group<i_Group>,
+@@ -1064,6 +1064,21 @@ def rocm_path_EQ : Joined<["--"], "rocm-path=">, Group<i_Group>,
    HelpText<"ROCm installation path, used for finding and automatically linking required bitcode libraries.">;
  def hip_path_EQ : Joined<["--"], "hip-path=">, Group<i_Group>,
    HelpText<"HIP runtime installation path, used for finding HIP version and adding HIP include path.">;
@@ -457,7 +457,7 @@ index 229f6141c750..6c8d1ea2485a 100644
  def amdgpu_arch_tool_EQ : Joined<["--"], "amdgpu-arch-tool=">, Group<i_Group>,
    HelpText<"Tool used for detecting AMD GPU arch in the system.">;
  def nvptx_arch_tool_EQ : Joined<["--"], "nvptx-arch-tool=">, Group<i_Group>,
-@@ -4629,6 +4644,18 @@ Flags<[NoXarchOption,CC1Option,FlangOption,FC1Option]>,
+@@ -4634,6 +4649,18 @@ Flags<[NoXarchOption,CC1Option,FlangOption,FC1Option]>,
    MetaVarName<"<language>">;
  def y : Joined<["-"], "y">;
  
@@ -477,10 +477,10 @@ index 229f6141c750..6c8d1ea2485a 100644
    CodeGenOpts<"DisableIntegratedAS">, DefaultFalse,
    NegFlag<SetTrue, [CC1Option, FlangOption], "Disable">, PosFlag<SetFalse, [], "Enable">,
 diff --git a/clang/lib/AST/ExprConstant.cpp b/clang/lib/AST/ExprConstant.cpp
-index f1c842e26199..579532caa16a 100644
+index c688467a2fef..5112dbb56f76 100644
 --- a/clang/lib/AST/ExprConstant.cpp
 +++ b/clang/lib/AST/ExprConstant.cpp
-@@ -3338,7 +3338,7 @@ static bool evaluateVarDeclInit(EvalInfo &Info, const Expr *E,
+@@ -3370,7 +3370,7 @@ static bool evaluateVarDeclInit(EvalInfo &Info, const Expr *E,
      // constant-folding cases, where the variable is not actually of a suitable
      // type for use in a constant expression (otherwise the DeclRefExpr would
      // have been value-dependent too), so diagnose that.
@@ -519,7 +519,7 @@ index cda03d69522d..49e85700652d 100644
    {
      PrettyStackTraceString CrashInfo("Optimizer");
 diff --git a/clang/lib/CodeGen/CGBuiltin.cpp b/clang/lib/CodeGen/CGBuiltin.cpp
-index 30f5f4e7061c..f5ee8c82b3e2 100644
+index 803895f64214..61b7efc52dbd 100644
 --- a/clang/lib/CodeGen/CGBuiltin.cpp
 +++ b/clang/lib/CodeGen/CGBuiltin.cpp
 @@ -2251,6 +2251,19 @@ static Value *tryUseTestFPKind(CodeGenFunction &CGF, unsigned BuiltinID,
@@ -542,7 +542,7 @@ index 30f5f4e7061c..f5ee8c82b3e2 100644
  RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
                                          const CallExpr *E,
                                          ReturnValueSlot ReturnValue) {
-@@ -5541,7 +5554,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
+@@ -5564,7 +5577,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
      llvm_unreachable("Bad evaluation kind in EmitBuiltinExpr");
    }
  
@@ -555,35 +555,55 @@ index 30f5f4e7061c..f5ee8c82b3e2 100644
    // Unknown builtin, for now just dump it out and return undef.
    return GetUndefRValue(E->getType());
 diff --git a/clang/lib/CodeGen/CGCall.cpp b/clang/lib/CodeGen/CGCall.cpp
-index bd272e016e92..766e1b4274db 100644
+index e2f267825837..b596569588d6 100644
 --- a/clang/lib/CodeGen/CGCall.cpp
 +++ b/clang/lib/CodeGen/CGCall.cpp
-@@ -4392,6 +4392,25 @@ void CodeGenFunction::EmitCallArgs(
-       ExplicitCC = FPT->getExtInfo().getCC();
-       ArgTypes.assign(FPT->param_type_begin() + ParamsToSkip,
-                       FPT->param_type_end());
-+      // TODO: this is a kludgy way to handle typeinfo being in the global
-+      //       address space, which makes the AST signature of operator== wrong
-+      //       as it takes a pointer to generic; since typeinfo is non-copyable
-+      //       and non-moveable, we assume that we can only ever form a
-+      //       comparison between implementation detail values that are in the
-+      //       global address space; this should be revisited.
-+      if (auto MD = dyn_cast_or_null<CXXMethodDecl>(AC.getDecl())) {
-+        if (MD->getOverloadedOperator() == OO_EqualEqual ||
-+            MD->getOverloadedOperator() == OO_ExclaimEqual) {
-+          if (MD->getParent()->isClass() &&
-+              MD->getParent()->isInStdNamespace() &&
-+              MD->getParent()->getName() == "type_info") {
-+            auto Ty = ArgTypes.back()->getAs<ReferenceType>()->getPointeeType();
-+            auto GlobAS = CGM.GetGlobalVarAddressSpace(nullptr);
-+            auto AsTy = getContext().getAddrSpaceQualType(Ty, GlobAS);
-+            ArgTypes.back() = getContext().getLValueReferenceType(AsTy);
+@@ -88,6 +88,11 @@ CanQualType CodeGenTypes::DeriveThisType(const CXXRecordDecl *RD,
+ 
+   if (MD)
+     RecTy = Context.getAddrSpaceQualType(RecTy, MD->getMethodQualifiers().getAddressSpace());
++  // TODO: this is a WiP kludgy investigation into handling type_info being in
++  //       the global address space.
++  // if (RD && RD->isInStdNamespace() && RD->getName() == "type_info")
++  //   RecTy = Context.getAddrSpaceQualType(RecTy,
++  //                                        CGM.GetGlobalVarAddressSpace(nullptr));
+   return Context.getPointerType(CanQualType::CreateUnsafe(RecTy));
+ }
+ 
+@@ -5212,11 +5217,29 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
+             V->getType()->isIntegerTy())
+           V = Builder.CreateZExt(V, ArgInfo.getCoerceToType());
+ 
+-        // If the argument doesn't match, perform a bitcast to coerce it.  This
+-        // can happen due to trivial type mismatches.
+         if (FirstIRArg < IRFuncTy->getNumParams() &&
+-            V->getType() != IRFuncTy->getParamType(FirstIRArg))
+-          V = Builder.CreateBitCast(V, IRFuncTy->getParamType(FirstIRArg));
++            V->getType() != IRFuncTy->getParamType(FirstIRArg)) {
++          auto VTy = V->getType();
++          auto IRTy = IRFuncTy->getParamType(FirstIRArg);
++
++          if (VTy->isPointerTy() &&
++              VTy->getPointerAddressSpace() != IRTy->getPointerAddressSpace()) {
++            // In the case of targets that use a non-default address space for
++            // globals it is possible to get a mismatch between the AST address
++            // space of type_info formals and the IR type of type_info actuals.
++            auto Ty = info_it->type.getTypePtr()->getPointeeType();
++            if (auto CD = Ty->getAsCXXRecordDecl()) {
++              if (CD->isInStdNamespace() && CD->getName() == "type_info")
++                V = Builder.CreateAddrSpaceCast(V, IRTy);
++              else
++                llvm_unreachable("Unexpected address space mismatch.");
++            }
++          } else {
++            // If the argument doesn't match, perform a bitcast to coerce it.
++            // This can happen due to trivial type mismatches.
++            V = Builder.CreateBitCast(V, IRFuncTy->getParamType(FirstIRArg));
 +          }
 +        }
-+      }
-     }
  
- #ifndef NDEBUG
+         if (ArgHasMaybeUndefAttr)
+           V = Builder.CreateFreeze(V);
 diff --git a/clang/lib/CodeGen/CGExprCXX.cpp b/clang/lib/CodeGen/CGExprCXX.cpp
 index 4d3f3e9603d9..dd3542054d43 100644
 --- a/clang/lib/CodeGen/CGExprCXX.cpp
@@ -598,7 +618,7 @@ index 4d3f3e9603d9..dd3542054d43 100644
    if (E->isTypeOperand()) {
      llvm::Constant *TypeInfo =
 diff --git a/clang/lib/CodeGen/CodeGenModule.cpp b/clang/lib/CodeGen/CodeGenModule.cpp
-index 07a9dec12f6f..aa93ddb2753e 100644
+index 8d2abc69c330..c8853e55b553 100644
 --- a/clang/lib/CodeGen/CodeGenModule.cpp
 +++ b/clang/lib/CodeGen/CodeGenModule.cpp
 @@ -3545,7 +3545,10 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
@@ -613,7 +633,7 @@ index 07a9dec12f6f..aa93ddb2753e 100644
          return;
      } else {
        // We need to emit host-side 'shadows' for all global
-@@ -5307,7 +5310,9 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
+@@ -5314,7 +5317,9 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
  
    setNonAliasAttributes(D, GV);
  
@@ -643,7 +663,7 @@ index 79a926cb9edd..2d0d34312356 100644
    llvm::FunctionType *FTy = llvm::FunctionType::get(Int8PtrTy, Args, false);
  
 diff --git a/clang/lib/Driver/Driver.cpp b/clang/lib/Driver/Driver.cpp
-index 488350169efa..65b5cb273563 100644
+index a43d3f07bc1d..e367b91d484e 100644
 --- a/clang/lib/Driver/Driver.cpp
 +++ b/clang/lib/Driver/Driver.cpp
 @@ -791,7 +791,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
@@ -768,10 +788,10 @@ index d0223322b56b..d75e21867d7b 100644
  
  void amdgpu::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 diff --git a/clang/lib/Driver/ToolChains/Clang.cpp b/clang/lib/Driver/ToolChains/Clang.cpp
-index e3fa315ffcb1..5ce599dbcbd1 100644
+index eae3643bd4bf..5586a3df5cd2 100644
 --- a/clang/lib/Driver/ToolChains/Clang.cpp
 +++ b/clang/lib/Driver/ToolChains/Clang.cpp
-@@ -6543,6 +6543,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
+@@ -6533,6 +6533,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
      if (Args.hasFlag(options::OPT_fgpu_allow_device_init,
                       options::OPT_fno_gpu_allow_device_init, false))
        CmdArgs.push_back("-fgpu-allow-device-init");
@@ -785,7 +805,7 @@ index e3fa315ffcb1..5ce599dbcbd1 100644
                        options::OPT_fno_hip_kernel_arg_name);
    }
 diff --git a/clang/lib/Driver/ToolChains/HIPAMD.cpp b/clang/lib/Driver/ToolChains/HIPAMD.cpp
-index e509a01f2f97..00db628dc1d1 100644
+index 7ff880270cab..8e31e3053440 100644
 --- a/clang/lib/Driver/ToolChains/HIPAMD.cpp
 +++ b/clang/lib/Driver/ToolChains/HIPAMD.cpp
 @@ -115,6 +115,8 @@ void AMDGCN::Linker::constructLldCommand(Compilation &C, const JobAction &JA,
@@ -797,7 +817,7 @@ index e509a01f2f97..00db628dc1d1 100644
  
    auto &TC = getToolChain();
    auto &D = TC.getDriver();
-@@ -250,6 +252,8 @@ void HIPAMDToolChain::addClangTargetOptions(
+@@ -246,6 +248,8 @@ void HIPAMDToolChain::addClangTargetOptions(
    if (!DriverArgs.hasFlag(options::OPT_fgpu_rdc, options::OPT_fno_gpu_rdc,
                            false))
      CC1Args.append({"-mllvm", "-amdgpu-internalize-symbols"});
@@ -845,7 +865,7 @@ index 554d8a6929ac..ffa239bae702 100644
    void print(raw_ostream &OS) const;
  
 diff --git a/clang/lib/Frontend/InitPreprocessor.cpp b/clang/lib/Frontend/InitPreprocessor.cpp
-index f8fae82fba12..51cf7333139a 100644
+index 93cd97bf8b68..c38c6d32ae0e 100644
 --- a/clang/lib/Frontend/InitPreprocessor.cpp
 +++ b/clang/lib/Frontend/InitPreprocessor.cpp
 @@ -586,6 +586,11 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
@@ -924,6 +944,21 @@ index 000000000000..87f4ea0243cb
 +__device__ void bar(float *a, float b) {
 +  *a = b;
 +}
+\ No newline at end of file
+diff --git a/clang/test/CodeGenStdPar/unsupported-builtins.cpp b/clang/test/CodeGenStdPar/unsupported-builtins.cpp
+new file mode 100644
+index 000000000000..96a04359e5ae
+--- /dev/null
++++ b/clang/test/CodeGenStdPar/unsupported-builtins.cpp
+@@ -0,0 +1,8 @@
++// RUN: %clang_cc1 -triple amdgcn-amd-amdhsa -aux-triple x86_64-unknown-linux-gnu \
++// RUN:   --stdpar -x hip -emit-llvm -fcuda-is-device -o - %s | FileCheck %s
++
++#define __global__ __attribute__((global))
++
++__global__ void foo() { return __builtin_ia32_pause(); }
++
++// CHECK: declare void @__builtin_ia32_pause__stdpar_unsupported()
 \ No newline at end of file
 diff --git a/clang/test/Driver/Inputs/stdpar/stdpar_lib.hpp b/clang/test/Driver/Inputs/stdpar/stdpar_lib.hpp
 new file mode 100644
@@ -1143,7 +1178,7 @@ index 576d0f3ff442..50e0f9756acc 100644
    Target
    TransformUtils
 diff --git a/llvm/lib/Passes/PassBuilder.cpp b/llvm/lib/Passes/PassBuilder.cpp
-index d0cbbcc0e310..2ffca90adc76 100644
+index bb6b40b14f8b..038f454328f1 100644
 --- a/llvm/lib/Passes/PassBuilder.cpp
 +++ b/llvm/lib/Passes/PassBuilder.cpp
 @@ -220,6 +220,7 @@
@@ -1167,7 +1202,7 @@ index 660cb2e974d7..c906640c63ce 100644
  #include "llvm/Transforms/Utils/AssumeBundleBuilder.h"
  #include "llvm/Transforms/Utils/CanonicalizeAliases.h"
 diff --git a/llvm/lib/Passes/PassRegistry.def b/llvm/lib/Passes/PassRegistry.def
-index e10dc995c493..9caa0ce30e91 100644
+index 3907a5fdee25..7bed83f89667 100644
 --- a/llvm/lib/Passes/PassRegistry.def
 +++ b/llvm/lib/Passes/PassRegistry.def
 @@ -107,6 +107,9 @@ MODULE_PASS("rpo-function-attrs", ReversePostOrderFunctionAttrsPass())
@@ -1181,7 +1216,7 @@ index e10dc995c493..9caa0ce30e91 100644
  MODULE_PASS("strip-dead-debug-info", StripDeadDebugInfoPass())
  MODULE_PASS("pseudo-probe", SampleProfileProbePass(TM))
 diff --git a/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp b/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp
-index f90c8e4bdddd..3ccfeab37ad2 100644
+index bad6976f1ff9..fbf96a8f4a1e 100644
 --- a/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp
 +++ b/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp
 @@ -57,6 +57,7 @@
@@ -2025,4 +2060,22 @@ index 000000000000..1384ba897ef7
 +declare ptr @__libc_malloc(i64 noundef)
 +
 +declare ptr @__libc_memalign(i64 noundef, i64 noundef)
+\ No newline at end of file
+diff --git a/llvm/test/Transforms/StdPar/unsupported-builtins.ll b/llvm/test/Transforms/StdPar/unsupported-builtins.ll
+new file mode 100644
+index 000000000000..23102963dc5f
+--- /dev/null
++++ b/llvm/test/Transforms/StdPar/unsupported-builtins.ll
+@@ -0,0 +1,11 @@
++; RUN: not opt -S -mtriple=amdgcn-amd-amdhsa -passes=stdpar-select-accelerator-code \
++; RUN: %s 2>&1 | FileCheck %s
++
++; CHECK: error: {{.*}} in function foo void (): Accelerator does not support the __builtin_ia32_pause function
++define amdgpu_kernel void @foo() {
++entry:
++  call void @__builtin_ia32_pause__stdpar_unsupported()
++  ret void
++}
++
++declare void @__builtin_ia32_pause__stdpar_unsupported()
 \ No newline at end of file
