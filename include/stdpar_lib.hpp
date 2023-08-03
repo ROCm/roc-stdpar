@@ -285,10 +285,23 @@
 
     namespace hipstd
     {
+        // TODO: temporarily remove the constraint on iterator type as it was
+        //       too restrictive, and requires a reformulation.
         template<typename I>
-        using IsRandomAccessIterator = std::is_same<
-            typename std::iterator_traits<I>::iterator_category,
-            std::random_access_iterator_tag>;
+        using IsRandomAccessIterator = std::true_type;
+        // std::conjunction<
+        //     std::negation<std::is_same<
+        //         typename std::iterator_traits<I>::iterator_category,
+        //         std::input_iterator_tag>>,
+        //     std::negation<std::is_same<
+        //         typename std::iterator_traits<I>::iterator_category,
+        //         std::output_iterator_tag>>,
+        //     std::negation<std::is_same<
+        //         typename std::iterator_traits<I>::iterator_category,
+        //         std::forward_iterator_tag>>,
+        //     std::negation<std::is_same<
+        //         typename std::iterator_traits<I>::iterator_category,
+        //         std::bidirectional_iterator_tag>>>;
         template<typename I>
         inline constexpr bool IsRandomAccessIterator_v =
             IsRandomAccessIterator<I>::value;
@@ -1433,7 +1446,13 @@
             enable_if_t<
                 ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
-        O set_difference(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
+        O set_difference(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo)
         {
             return ::thrust::set_difference(
                 ::thrust::device, fi0, li0, fi1, li1, fo);
@@ -1447,7 +1466,14 @@
             enable_if_t<
                 ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
-        O set_difference(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
+        O set_difference(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo,
+            R r)
         {
             return ::thrust::set_difference(
                 ::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
@@ -1463,7 +1489,13 @@
             enable_if_t<
                 ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
-        O set_intersection(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
+        O set_intersection(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo)
         {
             return ::thrust::set_intersection(
                 ::thrust::device, fi0, li0, fi1, li1, fo);
@@ -1477,7 +1509,14 @@
             enable_if_t<
                 ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
-        O set_intersection(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
+        O set_intersection(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo,
+            R r)
         {
             return ::thrust::set_intersection(
                 ::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
@@ -1493,7 +1532,13 @@
             enable_if_t<
                 ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
-        O set_symmetric_difference(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
+        O set_symmetric_difference(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo)
         {
             return ::thrust::set_symmetric_difference(
                 ::thrust::device, fi0, li0, fi1, li1, fo);
@@ -1507,7 +1552,14 @@
             enable_if_t<
                 ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
-        O set_symmetric_difference(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
+        O set_symmetric_difference(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo,
+            R r)
         {
             return ::thrust::set_symmetric_difference(
                 ::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
@@ -1523,7 +1575,13 @@
             enable_if_t<
                 ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
-        O set_union(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
+        O set_union(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo)
         {
             return
                 ::thrust::set_union(::thrust::device, fi0, li0, fi1, li1, fo);
@@ -1537,7 +1595,14 @@
             enable_if_t<
                 ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
         inline
-        O set_union(I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
+        O set_union(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo,
+            R r)
         {
             return ::thrust::set_union(
                 ::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
