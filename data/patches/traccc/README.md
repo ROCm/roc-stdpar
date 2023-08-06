@@ -9,7 +9,7 @@
     the moment it is necessary to manually remove the dependence on the
     imported library `detray::thrust`
   - the `clang` value is added to the set of possible values of the
-    `TRACCC_STDPAR_BACKEND`, do denote offload via Clang/LLVM
+    `TRACCC_STDPAR_BACKEND`, to denote offload via Clang/LLVM
   - the following variables are added to CMake:
     - `TRACCC_STDPAR_PATH`: specifies the path to the forwarding header
     - `TRACCC_STDPAR_TARGET`: specifies the target for algorithm offload
