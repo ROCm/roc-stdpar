@@ -73,9 +73,15 @@
 
         namespace hipstd
         {
-            using Header = std::pair<std::size_t, std::size_t>;
+            struct Header {
+                void* alloc_ptr;
+                std::size_t size;
+                std::size_t align;
+            };
 
-            inline std::pmr::synchronized_pool_resource heap{[]() {
+            inline std::pmr::synchronized_pool_resource heap{
+                std::pmr::pool_options{0u, 15u * 1024u},
+                []() {
                 static class final : public std::pmr::memory_resource {
                     // TODO: add exception handling
                     void* do_allocate(std::size_t n, std::size_t a) override
@@ -108,21 +114,18 @@
         inline
         __attribute__((used))
         void* __stdpar_aligned_alloc(std::size_t a, std::size_t n)
-        {   // TODO: deal with alignment.
-            auto m = __builtin_align_up(n + sizeof(hipstd::Header), a);
+        {   // TODO: tidy up, revert to using std.
+            auto m = n + sizeof(hipstd::Header) + a - 1;
 
             auto r = hipstd::heap.allocate(m, a);
 
-            auto h =
-                reinterpret_cast<void*>(static_cast<hipstd::Header*>(r) + 1);
-            if (auto p = std::align(a, n, h, m -= sizeof(hipstd::Header))) {
-                static_cast<hipstd::Header*>(p)[-1] =
-                    {m + sizeof(hipstd::Header), a};
+            if (!r) return r;
 
-                return p;
-            }
+            const auto h = static_cast<hipstd::Header*>(r) + 1;
+            const auto p = (reinterpret_cast<std::uintptr_t>(h) + a - 1) & -a;
+            reinterpret_cast<hipstd::Header*>(p)[-1] = {r, m, a};
 
-            return nullptr;
+            return reinterpret_cast<void*>(p);
         }
 
         extern "C"
@@ -170,7 +173,7 @@
             auto r = hipPointerGetAttributes(&tmp, h);
 
             if (!tmp.isManaged) __stdpar_hidden_free(p);
-            else hipstd::heap.deallocate(h, h->first, h->second);
+            else hipstd::heap.deallocate(h->alloc_ptr, h->size, h->align);
 
             return q;
         }
@@ -195,7 +198,7 @@
 
             if (!tmp.isManaged) return __stdpar_hidden_free(p);
 
-            return hipstd::heap.deallocate(h, h->first, h->second);
+            return hipstd::heap.deallocate(h->alloc_ptr, h->size, h->align);
         }
 
         extern "C"
@@ -277,9 +280,10 @@
         extern "C"
         inline
         __attribute__((used))
-        void __stdpar_operator_delete_sized(void* p, std::size_t) noexcept
-        {   // TODO: should exploit the size here
-            return __stdpar_operator_delete(p);
+        void __stdpar_operator_delete_sized(void* p, std::size_t n) noexcept
+        {
+            return __stdpar_operator_delete_aligned_sized(
+                p, n, alignof(std::max_align_t));
         }
     #endif
 
