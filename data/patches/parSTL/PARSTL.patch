@@ -1,0 +1,47 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 0e6468a..9f716bb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -21,7 +21,7 @@ else()
+     error("TBB_DIR not set")
+ endif()
+ 
+-# nvhpc 22.9 and beyond is recommended 
++# nvhpc 22.9 and beyond, or LLVM 18.0+, are recommended
+ if(NVCXX)
+     set(NVCXX ${NVCXX} CACHE PATH "NVCXX")
+ else()
+diff --git a/nvc/CMakeLists.txt b/nvc/CMakeLists.txt
+index 196721c..5b47d1b 100644
+--- a/nvc/CMakeLists.txt
++++ b/nvc/CMakeLists.txt
+@@ -1,9 +1,27 @@
+ set(CMAKE_CXX_COMPILER ${NVCXX})
+ 
+-set(CMAKE_CXX_FLAGS "-w -fast -Mnouniform -Mfprelaxed -stdpar=multicore -std=c++11 -DUSE_MPI=0 --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/bin/")
+ add_executable(nvcParMulticore nvcPar.cpp)
++target_compile_definitions(nvcParMulticore PRIVATE USE_MPI=0)
+ target_include_directories(nvcParMulticore PRIVATE "${CMAKE_CURRENT_LIST_DIR}/commons")
++target_compile_options(nvcParMulticore PRIVATE -w -fast -std=c++17)
++if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
++    target_compile_options(nvcParMulticore PRIVATE -fopenmp-simd -march=native)
++else ()
++    target_compile_options(nvcParMulticore PRIVATE -Mnouniform -Mfprelaxed -stdpar=multicore --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/bin/)
++endif()
++target_link_libraries(nvcParMulticore PRIVATE tbb)
+ 
+-set(CMAKE_CXX_FLAGS "-w -fast -Mnouniform -Mfprelaxed -stdpar=gpu -std=c++11 -DUSE_MPI=0")
+ add_executable(nvcParGpu nvcPar.cpp)
++target_compile_definitions(nvcParGpu PRIVATE USE_MPI=0)
+ target_include_directories(nvcParGpu PRIVATE "${CMAKE_CURRENT_LIST_DIR}/commons")
++target_compile_options(nvcParGpu PRIVATE -w -fast)
++if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
++    target_compile_options(nvcParGpu PRIVATE --stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++    if (NOT STDPAR_TARGET MATCHES "^gfx9")
++        target_compile_options(nvcParGpu PRIVATE --stdpar-interpose-alloc)
++    endif ()
++else ()
++    target_compile_options(nvcParGpu PRIVATE -Mnouniform -Mfprelaxed -stdpar=gpu)
++endif()
++target_link_libraries(nvcParGpu PRIVATE tbb)
++target_link_options(nvcParGpu PRIVATE -stdpar)
