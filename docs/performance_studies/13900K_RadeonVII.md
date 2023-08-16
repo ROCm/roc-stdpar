@@ -196,6 +196,22 @@ directly.
 | paralg_column  | 16               | 0.81             | 0.01                     |
 | paralg_element | 16               | 147              | 9                        |
 
+## parSTL
+
+- [repo](https://github.com/weilewei/parSTL)
+- [patch](../../data/patches/parSTL/PARSTL.patch)
+
+| Test             | A - CPU (ms) | B - GPU (ms) | A / B (higher is better) |
+|:----------------:|:------------:|:------------:|:------------------------:|
+| sort      - 10^5 | 0.07         | 2            | 0.03                     |
+| sort      - 10^6 | 0.7          | 18           | 0.03                     |
+| sort      - 10^7 | 13           | 9            | 1.4                      |
+| sort      - 10^8 | 163          | 94           | 1.7                      |
+| transform - 10^5 | 0.19         | 21           | 0.009                    |
+| transform - 10^6 | 0.58         | 22           | 0.02                     |
+| transform - 10^7 | 5            | 28           | 0.17                     |
+| transform - 10^8 | 53           | 89           | 0.5                      |
+
 ## STLBM - Lattice Boltzmann simulation framework based on C++ Parallel Algorithms
 
 - [repo](https://gitlab.com/unigehpfs/stlbm)
