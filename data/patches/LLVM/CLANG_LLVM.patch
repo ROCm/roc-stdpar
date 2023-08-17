@@ -419,7 +419,7 @@ index 1b69324d073a..a4304868c9cd 100644
  def err_drv_no_hipspv_device_lib : Error<
    "cannot find HIP device library%select{| for %1}0; provide its path via "
 diff --git a/clang/include/clang/Basic/LangOptions.def b/clang/include/clang/Basic/LangOptions.def
-index 007b3737f83e..188a8e20066c 100644
+index 102209ce899d..2e861cd56048 100644
 --- a/clang/include/clang/Basic/LangOptions.def
 +++ b/clang/include/clang/Basic/LangOptions.def
 @@ -278,6 +278,8 @@ LANGOPT(SYCLIsHost        , 1, 0, "SYCL host compilation")
@@ -432,12 +432,12 @@ index 007b3737f83e..188a8e20066c 100644
  
  LANGOPT(SizedDeallocation , 1, 0, "sized deallocation")
 diff --git a/clang/include/clang/Driver/Options.td b/clang/include/clang/Driver/Options.td
-index 3756b42da3b3..9d083371914c 100644
+index 85ce340255d9..10d322653a84 100644
 --- a/clang/include/clang/Driver/Options.td
 +++ b/clang/include/clang/Driver/Options.td
-@@ -1064,6 +1064,21 @@ def rocm_path_EQ : Joined<["--"], "rocm-path=">, Group<i_Group>,
+@@ -1256,6 +1256,21 @@ def rocm_path_EQ : Joined<["--"], "rocm-path=">, Group<hip_Group>,
    HelpText<"ROCm installation path, used for finding and automatically linking required bitcode libraries.">;
- def hip_path_EQ : Joined<["--"], "hip-path=">, Group<i_Group>,
+ def hip_path_EQ : Joined<["--"], "hip-path=">, Group<hip_Group>,
    HelpText<"HIP runtime installation path, used for finding HIP version and adding HIP include path.">;
 +// TODO: use MarshallingInfo here
 +def stdpar_path_EQ : Joined<["--"], "stdpar-path=">, Group<i_Group>,
@@ -454,20 +454,20 @@ index 3756b42da3b3..9d083371914c 100644
 +  HelpText<
 +    "rocPrim path, required by the HIP Standard Parallel Algorithm "
 +    "Acceleration library, used to implicitly include the rocPrim library.">;
- def amdgpu_arch_tool_EQ : Joined<["--"], "amdgpu-arch-tool=">, Group<i_Group>,
-   HelpText<"Tool used for detecting AMD GPU arch in the system.">;
- def nvptx_arch_tool_EQ : Joined<["--"], "nvptx-arch-tool=">, Group<i_Group>,
-@@ -4634,6 +4649,18 @@ Flags<[NoXarchOption,CC1Option,FlangOption,FC1Option]>,
+ def rocm_device_lib_path_EQ : Joined<["--"], "rocm-device-lib-path=">, Group<hip_Group>,
+   HelpText<"ROCm device library path. Alternative to rocm-path.">;
+ def : Joined<["--"], "hip-device-lib-path=">, Alias<rocm_device_lib_path_EQ>;
+@@ -5308,6 +5323,18 @@ Flags<[NoXarchOption]>,
    MetaVarName<"<language>">;
  def y : Joined<["-"], "y">;
  
 +// TODO: we may want to alias this to -x hip
-+def stdpar : Flag<["-", "--"], "stdpar">, Flags<[CoreOption, CC1Option]>,
++def stdpar : Flag<["-", "--"], "stdpar">, Visibility<[ClangOption, CC1Option]>,
 +  Group<CompileOnly_Group>,
 +  HelpText<"Enable HIP acceleration for standard parallel algorithms">,
 +  MarshallingInfoFlag<LangOpts<"HIPStdPar">>;
 +def stdpar_interpose_alloc : Flag<["-", "--"], "stdpar-interpose-alloc">,
-+  Flags<[CoreOption, CC1Option]>,
++  Visibility<[ClangOption, CC1Option]>,
 +  Group<CompileOnly_Group>,
 +  HelpText<"Replace all memory allocation / deallocation calls with "
 +           "hipManagedMalloc / hipFree equivalents.">,
@@ -475,12 +475,12 @@ index 3756b42da3b3..9d083371914c 100644
 +
  defm integrated_as : BoolFOption<"integrated-as",
    CodeGenOpts<"DisableIntegratedAS">, DefaultFalse,
-   NegFlag<SetTrue, [CC1Option, FlangOption], "Disable">, PosFlag<SetFalse, [], "Enable">,
+   NegFlag<SetTrue, [], [ClangOption, CC1Option, FlangOption], "Disable">,
 diff --git a/clang/lib/AST/ExprConstant.cpp b/clang/lib/AST/ExprConstant.cpp
-index c688467a2fef..5112dbb56f76 100644
+index e3569be5549c..36a3e25be189 100644
 --- a/clang/lib/AST/ExprConstant.cpp
 +++ b/clang/lib/AST/ExprConstant.cpp
-@@ -3370,7 +3370,7 @@ static bool evaluateVarDeclInit(EvalInfo &Info, const Expr *E,
+@@ -3378,7 +3378,7 @@ static bool evaluateVarDeclInit(EvalInfo &Info, const Expr *E,
      // constant-folding cases, where the variable is not actually of a suitable
      // type for use in a constant expression (otherwise the DeclRefExpr would
      // have been value-dependent too), so diagnose that.
@@ -490,7 +490,7 @@ index c688467a2fef..5112dbb56f76 100644
        Info.FFDiag(E, Info.getLangOpts().CPlusPlus11
                           ? diag::note_constexpr_ltor_non_constexpr
 diff --git a/clang/lib/CodeGen/BackendUtil.cpp b/clang/lib/CodeGen/BackendUtil.cpp
-index cda03d69522d..49e85700652d 100644
+index 3e8b2b78a392..4575175da5de 100644
 --- a/clang/lib/CodeGen/BackendUtil.cpp
 +++ b/clang/lib/CodeGen/BackendUtil.cpp
 @@ -77,6 +77,7 @@
@@ -501,7 +501,7 @@ index cda03d69522d..49e85700652d 100644
  #include "llvm/Transforms/Utils/Debugify.h"
  #include "llvm/Transforms/Utils/EntryExitInstrumenter.h"
  #include "llvm/Transforms/Utils/ModuleUtils.h"
-@@ -1093,6 +1094,16 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
+@@ -1094,6 +1095,16 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
        TheModule->addModuleFlag(Module::Error, "UnifiedLTO", uint32_t(1));
    }
  
@@ -519,10 +519,10 @@ index cda03d69522d..49e85700652d 100644
    {
      PrettyStackTraceString CrashInfo("Optimizer");
 diff --git a/clang/lib/CodeGen/CGBuiltin.cpp b/clang/lib/CodeGen/CGBuiltin.cpp
-index 803895f64214..61b7efc52dbd 100644
+index 5a183d355327..10d6d0d51102 100644
 --- a/clang/lib/CodeGen/CGBuiltin.cpp
 +++ b/clang/lib/CodeGen/CGBuiltin.cpp
-@@ -2251,6 +2251,19 @@ static Value *tryUseTestFPKind(CodeGenFunction &CGF, unsigned BuiltinID,
+@@ -2237,6 +2237,19 @@ static Value *tryUseTestFPKind(CodeGenFunction &CGF, unsigned BuiltinID,
    return nullptr;
  }
  
@@ -532,7 +532,7 @@ index 803895f64214..61b7efc52dbd 100644
 +  auto FnTy = CGF->CGM.getTypes().GetFunctionType(FD);
 +  auto UBF = CGF->CGM.getModule().getOrInsertFunction(Name, FnTy);
 +
-+  SmallVector<Value*, 16> Args;
++  SmallVector<Value *, 16> Args;
 +  for (auto &&FormalTy : FnTy->params())
 +    Args.push_back(llvm::PoisonValue::get(FormalTy));
 +
@@ -542,7 +542,7 @@ index 803895f64214..61b7efc52dbd 100644
  RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
                                          const CallExpr *E,
                                          ReturnValueSlot ReturnValue) {
-@@ -5564,7 +5577,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
+@@ -5546,7 +5559,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
      llvm_unreachable("Bad evaluation kind in EmitBuiltinExpr");
    }
  
@@ -554,74 +554,178 @@ index 803895f64214..61b7efc52dbd 100644
  
    // Unknown builtin, for now just dump it out and return undef.
    return GetUndefRValue(E->getType());
-diff --git a/clang/lib/CodeGen/CGCall.cpp b/clang/lib/CodeGen/CGCall.cpp
-index e2f267825837..b596569588d6 100644
---- a/clang/lib/CodeGen/CGCall.cpp
-+++ b/clang/lib/CodeGen/CGCall.cpp
-@@ -88,6 +88,11 @@ CanQualType CodeGenTypes::DeriveThisType(const CXXRecordDecl *RD,
- 
-   if (MD)
-     RecTy = Context.getAddrSpaceQualType(RecTy, MD->getMethodQualifiers().getAddressSpace());
-+  // TODO: this is a WiP kludgy investigation into handling type_info being in
-+  //       the global address space.
-+  // if (RD && RD->isInStdNamespace() && RD->getName() == "type_info")
-+  //   RecTy = Context.getAddrSpaceQualType(RecTy,
-+  //                                        CGM.GetGlobalVarAddressSpace(nullptr));
-   return Context.getPointerType(CanQualType::CreateUnsafe(RecTy));
- }
- 
-@@ -5212,11 +5217,29 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
-             V->getType()->isIntegerTy())
-           V = Builder.CreateZExt(V, ArgInfo.getCoerceToType());
- 
--        // If the argument doesn't match, perform a bitcast to coerce it.  This
--        // can happen due to trivial type mismatches.
-         if (FirstIRArg < IRFuncTy->getNumParams() &&
--            V->getType() != IRFuncTy->getParamType(FirstIRArg))
--          V = Builder.CreateBitCast(V, IRFuncTy->getParamType(FirstIRArg));
-+            V->getType() != IRFuncTy->getParamType(FirstIRArg)) {
-+          auto VTy = V->getType();
-+          auto IRTy = IRFuncTy->getParamType(FirstIRArg);
+@@ -5556,6 +5572,16 @@ static Value *EmitTargetArchBuiltinExpr(CodeGenFunction *CGF,
+                                         unsigned BuiltinID, const CallExpr *E,
+                                         ReturnValueSlot ReturnValue,
+                                         llvm::Triple::ArchType Arch) {
++  // When compiling in StdPar mode we have to be conservative in rejecting
++  // target specific features in the FE, and defer the possible error to the
++  // AcceleratorCodeSelection pass, wherein iff an unsupported target builtin is
++  // referenced by an accelerator executable function, we emit an error.
++  // Returning nullptr here leads to the builtin being handled in
++  // EmitStdParUnsupportedBuiltin.
++  if (CGF->getLangOpts().HIPStdPar && CGF->getLangOpts().CUDAIsDevice &&
++      Arch != CGF->getTarget().getTriple().getArch())
++    return nullptr;
 +
-+          if (VTy->isPointerTy() &&
-+              VTy->getPointerAddressSpace() != IRTy->getPointerAddressSpace()) {
-+            // In the case of targets that use a non-default address space for
-+            // globals it is possible to get a mismatch between the AST address
-+            // space of type_info formals and the IR type of type_info actuals.
-+            auto Ty = info_it->type.getTypePtr()->getPointeeType();
-+            if (auto CD = Ty->getAsCXXRecordDecl()) {
-+              if (CD->isInStdNamespace() && CD->getName() == "type_info")
-+                V = Builder.CreateAddrSpaceCast(V, IRTy);
-+              else
-+                llvm_unreachable("Unexpected address space mismatch.");
-+            }
-+          } else {
-+            // If the argument doesn't match, perform a bitcast to coerce it.
-+            // This can happen due to trivial type mismatches.
-+            V = Builder.CreateBitCast(V, IRFuncTy->getParamType(FirstIRArg));
-+          }
-+        }
- 
-         if (ArgHasMaybeUndefAttr)
-           V = Builder.CreateFreeze(V);
+   switch (Arch) {
+   case llvm::Triple::arm:
+   case llvm::Triple::armeb:
 diff --git a/clang/lib/CodeGen/CGExprCXX.cpp b/clang/lib/CodeGen/CGExprCXX.cpp
-index 4d3f3e9603d9..dd3542054d43 100644
+index 4d3f3e9603d9..34d4f37a5d29 100644
 --- a/clang/lib/CodeGen/CGExprCXX.cpp
 +++ b/clang/lib/CodeGen/CGExprCXX.cpp
-@@ -2194,7 +2194,7 @@ static llvm::Value *EmitTypeidFromVTable(CodeGenFunction &CGF, const Expr *E,
- }
+@@ -2195,11 +2195,19 @@ static llvm::Value *EmitTypeidFromVTable(CodeGenFunction &CGF, const Expr *E,
  
  llvm::Value *CodeGenFunction::EmitCXXTypeidExpr(const CXXTypeidExpr *E) {
--  llvm::Type *PtrTy = llvm::PointerType::getUnqual(getLLVMContext());
-+  llvm::Type *PtrTy = CGM.GlobalsInt8PtrTy;
+   llvm::Type *PtrTy = llvm::PointerType::getUnqual(getLLVMContext());
++  LangAS GlobAS = CGM.GetGlobalVarAddressSpace(nullptr);
++
++  auto MaybeASCast = [=](auto &&TypeInfo) {
++    if (GlobAS == LangAS::Default)
++      return TypeInfo;
++    return getTargetHooks().performAddrSpaceCast(CGM,TypeInfo, GlobAS,
++                                                 LangAS::Default, PtrTy);
++  };
  
    if (E->isTypeOperand()) {
      llvm::Constant *TypeInfo =
+         CGM.GetAddrOfRTTIDescriptor(E->getTypeOperand(getContext()));
+-    return TypeInfo;
++    return MaybeASCast(TypeInfo);
+   }
+ 
+   // C++ [expr.typeid]p2:
+@@ -2212,7 +2220,7 @@ llvm::Value *CodeGenFunction::EmitCXXTypeidExpr(const CXXTypeidExpr *E) {
+     return EmitTypeidFromVTable(*this, E->getExprOperand(), PtrTy);
+ 
+   QualType OperandTy = E->getExprOperand()->getType();
+-  return CGM.GetAddrOfRTTIDescriptor(OperandTy);
++  return MaybeASCast(CGM.GetAddrOfRTTIDescriptor(OperandTy));
+ }
+ 
+ static llvm::Value *EmitDynamicCastToNull(CodeGenFunction &CGF,
+diff --git a/clang/lib/CodeGen/CGStmt.cpp b/clang/lib/CodeGen/CGStmt.cpp
+index 2184b8600d76..497791190bd7 100644
+--- a/clang/lib/CodeGen/CGStmt.cpp
++++ b/clang/lib/CodeGen/CGStmt.cpp
+@@ -2418,6 +2418,23 @@ EmitAsmStores(CodeGenFunction &CGF, const AsmStmt &S,
+   }
+ }
+ 
++static void EmitStdParUnsupportedAsm(CodeGenFunction *CGF, const AsmStmt &S) {
++  constexpr auto Name = "__ASM__stdpar_unsupported";
++
++  StringRef Asm;
++  if (auto GCCAsm = dyn_cast<GCCAsmStmt>(&S))
++    Asm = GCCAsm->getAsmString()->getString();
++
++  auto &Ctx = CGF->CGM.getLLVMContext();
++
++  auto StrTy = llvm::ConstantDataArray::getString(Ctx, Asm);
++  auto FnTy = llvm::FunctionType::get(llvm::Type::getVoidTy(Ctx),
++                                      {StrTy->getType()}, false);
++  auto UBF = CGF->CGM.getModule().getOrInsertFunction(Name, FnTy);
++
++  CGF->Builder.CreateCall(UBF, {StrTy});
++}
++
+ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
+   // Pop all cleanup blocks at the end of the asm statement.
+   CodeGenFunction::RunCleanupsScope Cleanups(*this);
+@@ -2429,27 +2446,38 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
+   SmallVector<TargetInfo::ConstraintInfo, 4> OutputConstraintInfos;
+   SmallVector<TargetInfo::ConstraintInfo, 4> InputConstraintInfos;
+ 
+-  for (unsigned i = 0, e = S.getNumOutputs(); i != e; i++) {
++  bool IsStdPar = getLangOpts().HIPStdPar && getLangOpts().CUDAIsDevice;
++  bool IsValidTargetASM = true;
++  for (unsigned i = 0, e = S.getNumOutputs(); i != e && IsValidTargetASM; i++) {
+     StringRef Name;
+     if (const GCCAsmStmt *GAS = dyn_cast<GCCAsmStmt>(&S))
+       Name = GAS->getOutputName(i);
+     TargetInfo::ConstraintInfo Info(S.getOutputConstraint(i), Name);
+     bool IsValid = getTarget().validateOutputConstraint(Info); (void)IsValid;
+-    assert(IsValid && "Failed to parse output constraint");
++    if (IsStdPar && !IsValid)
++      IsValidTargetASM = false;
++    else
++      assert(IsValid && "Failed to parse output constraint");
+     OutputConstraintInfos.push_back(Info);
+   }
+ 
+-  for (unsigned i = 0, e = S.getNumInputs(); i != e; i++) {
++  for (unsigned i = 0, e = S.getNumInputs(); i != e && IsValidTargetASM; i++) {
+     StringRef Name;
+     if (const GCCAsmStmt *GAS = dyn_cast<GCCAsmStmt>(&S))
+       Name = GAS->getInputName(i);
+     TargetInfo::ConstraintInfo Info(S.getInputConstraint(i), Name);
+     bool IsValid =
+       getTarget().validateInputConstraint(OutputConstraintInfos, Info);
+-    assert(IsValid && "Failed to parse input constraint"); (void)IsValid;
++    if (IsStdPar && !IsValid)
++      IsValidTargetASM = false;
++    else
++      assert(IsValid && "Failed to parse input constraint"); (void)IsValid;
+     InputConstraintInfos.push_back(Info);
+   }
+ 
++  if (!IsValidTargetASM)
++    return EmitStdParUnsupportedAsm(this, S);
++
+   std::string Constraints;
+ 
+   std::vector<LValue> ResultRegDests;
+diff --git a/clang/lib/CodeGen/CodeGenFunction.cpp b/clang/lib/CodeGen/CodeGenFunction.cpp
+index 2000c4ce02c9..ad217ab1c74d 100644
+--- a/clang/lib/CodeGen/CodeGenFunction.cpp
++++ b/clang/lib/CodeGen/CodeGenFunction.cpp
+@@ -2594,10 +2594,15 @@ void CodeGenFunction::checkTargetFeatures(SourceLocation Loc,
+   std::string MissingFeature;
+   llvm::StringMap<bool> CallerFeatureMap;
+   CGM.getContext().getFunctionFeatureMap(CallerFeatureMap, FD);
++  // When compiling in StdPar mode we have to be conservative in rejecting
++  // target specific features in the FE, and defer the possible error to the
++  // AcceleratorCodeSelection pass, wherein iff an unsupported target builtin is
++  // referenced by an accelerator executable function, we emit an error.
++  bool IsStdPar = getLangOpts().HIPStdPar && getLangOpts().CUDAIsDevice;
+   if (BuiltinID) {
+     StringRef FeatureList(CGM.getContext().BuiltinInfo.getRequiredFeatures(BuiltinID));
+     if (!Builtin::evaluateRequiredTargetFeatures(
+-        FeatureList, CallerFeatureMap)) {
++        FeatureList, CallerFeatureMap) && !IsStdPar) {
+       CGM.getDiags().Report(Loc, diag::err_builtin_needs_feature)
+           << TargetDecl->getDeclName()
+           << FeatureList;
+@@ -2631,8 +2636,9 @@ void CodeGenFunction::checkTargetFeatures(SourceLocation Loc,
+       }
+       return true;
+     }))
+-      CGM.getDiags().Report(Loc, diag::err_function_needs_feature)
+-          << FD->getDeclName() << TargetDecl->getDeclName() << MissingFeature;
++      if (!IsStdPar)
++        CGM.getDiags().Report(Loc, diag::err_function_needs_feature)
++            << FD->getDeclName() << TargetDecl->getDeclName() << MissingFeature;
+   } else if (!FD->isMultiVersion() && FD->hasAttr<TargetAttr>()) {
+     llvm::StringMap<bool> CalleeFeatureMap;
+     CGM.getContext().getFunctionFeatureMap(CalleeFeatureMap, TargetDecl);
+@@ -2640,8 +2646,9 @@ void CodeGenFunction::checkTargetFeatures(SourceLocation Loc,
+     for (const auto &F : CalleeFeatureMap) {
+       if (F.getValue() && (!CallerFeatureMap.lookup(F.getKey()) ||
+                            !CallerFeatureMap.find(F.getKey())->getValue()))
+-        CGM.getDiags().Report(Loc, diag::err_function_needs_feature)
+-            << FD->getDeclName() << TargetDecl->getDeclName() << F.getKey();
++        if (!IsStdPar)
++          CGM.getDiags().Report(Loc, diag::err_function_needs_feature)
++              << FD->getDeclName() << TargetDecl->getDeclName() << F.getKey();
+     }
+   }
+ }
 diff --git a/clang/lib/CodeGen/CodeGenModule.cpp b/clang/lib/CodeGen/CodeGenModule.cpp
-index 8d2abc69c330..c8853e55b553 100644
+index 0d22713dbb31..df05266269b7 100644
 --- a/clang/lib/CodeGen/CodeGenModule.cpp
 +++ b/clang/lib/CodeGen/CodeGenModule.cpp
-@@ -3545,7 +3545,10 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
+@@ -3558,7 +3558,10 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
            !Global->hasAttr<CUDAConstantAttr>() &&
            !Global->hasAttr<CUDASharedAttr>() &&
            !Global->getType()->isCUDADeviceBuiltinSurfaceType() &&
@@ -633,40 +737,11 @@ index 8d2abc69c330..c8853e55b553 100644
          return;
      } else {
        // We need to emit host-side 'shadows' for all global
-@@ -5314,7 +5317,9 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
- 
-   setNonAliasAttributes(D, GV);
- 
--  if (D->getTLSKind() && !GV->isThreadLocal()) {
-+  if (D->getTLSKind() &&
-+      !GV->isThreadLocal() &&
-+      !(getLangOpts().HIPStdPar && getLangOpts().CUDAIsDevice)) {
-     if (D->getTLSKind() == VarDecl::TLS_Dynamic)
-       CXXThreadLocals.push_back(D);
-     setTLSMode(GV, *D);
-diff --git a/clang/lib/CodeGen/ItaniumCXXABI.cpp b/clang/lib/CodeGen/ItaniumCXXABI.cpp
-index 79a926cb9edd..2d0d34312356 100644
---- a/clang/lib/CodeGen/ItaniumCXXABI.cpp
-+++ b/clang/lib/CodeGen/ItaniumCXXABI.cpp
-@@ -1349,10 +1349,12 @@ static llvm::FunctionCallee getItaniumDynamicCastFn(CodeGenFunction &CGF) {
-   //                      std::ptrdiff_t src2dst_offset);
- 
-   llvm::Type *Int8PtrTy = CGF.Int8PtrTy;
-+  llvm::Type *GlobalsInt8PtrTy = CGF.GlobalsInt8PtrTy;
-   llvm::Type *PtrDiffTy =
-     CGF.ConvertType(CGF.getContext().getPointerDiffType());
- 
--  llvm::Type *Args[4] = { Int8PtrTy, Int8PtrTy, Int8PtrTy, PtrDiffTy };
-+  llvm::Type *Args[4] =
-+    { Int8PtrTy, GlobalsInt8PtrTy, GlobalsInt8PtrTy, PtrDiffTy };
- 
-   llvm::FunctionType *FTy = llvm::FunctionType::get(Int8PtrTy, Args, false);
- 
 diff --git a/clang/lib/Driver/Driver.cpp b/clang/lib/Driver/Driver.cpp
-index a43d3f07bc1d..e367b91d484e 100644
+index ede9967d8cef..76c6eb1c135f 100644
 --- a/clang/lib/Driver/Driver.cpp
 +++ b/clang/lib/Driver/Driver.cpp
-@@ -791,7 +791,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
+@@ -773,7 +773,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                     [](std::pair<types::ID, const llvm::opt::Arg *> &I) {
                       return types::isHIP(I.first);
                     }) ||
@@ -676,7 +751,7 @@ index a43d3f07bc1d..e367b91d484e 100644
    if (IsCuda && IsHIP) {
      Diag(clang::diag::err_drv_mix_cuda_hip);
      return;
-@@ -2743,6 +2744,10 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
+@@ -2718,6 +2719,10 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
          }
        }
  
@@ -687,7 +762,7 @@ index a43d3f07bc1d..e367b91d484e 100644
        if (DiagnoseInputExistence(Args, Value, Ty, /*TypoCorrect=*/true))
          Inputs.push_back(std::make_pair(Ty, A));
  
-@@ -3953,6 +3958,11 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
+@@ -3928,6 +3933,11 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
    phases::ID FinalPhase = getFinalPhase(Args, &FinalPhaseArg);
  
    if (FinalPhase == phases::Link) {
@@ -788,10 +863,10 @@ index d0223322b56b..d75e21867d7b 100644
  
  void amdgpu::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 diff --git a/clang/lib/Driver/ToolChains/Clang.cpp b/clang/lib/Driver/ToolChains/Clang.cpp
-index eae3643bd4bf..5586a3df5cd2 100644
+index 6b2b8507061c..f3ab03b3e644 100644
 --- a/clang/lib/Driver/ToolChains/Clang.cpp
 +++ b/clang/lib/Driver/ToolChains/Clang.cpp
-@@ -6533,6 +6533,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
+@@ -6550,6 +6550,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
      if (Args.hasFlag(options::OPT_fgpu_allow_device_init,
                       options::OPT_fno_gpu_allow_device_init, false))
        CmdArgs.push_back("-fgpu-allow-device-init");
@@ -865,10 +940,10 @@ index 554d8a6929ac..ffa239bae702 100644
    void print(raw_ostream &OS) const;
  
 diff --git a/clang/lib/Frontend/InitPreprocessor.cpp b/clang/lib/Frontend/InitPreprocessor.cpp
-index 93cd97bf8b68..c38c6d32ae0e 100644
+index e5db8a654e67..abf4ae44cbf9 100644
 --- a/clang/lib/Frontend/InitPreprocessor.cpp
 +++ b/clang/lib/Frontend/InitPreprocessor.cpp
-@@ -586,6 +586,11 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
+@@ -585,6 +585,11 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
      Builder.defineMacro("__HIP_MEMORY_SCOPE_WORKGROUP", "3");
      Builder.defineMacro("__HIP_MEMORY_SCOPE_AGENT", "4");
      Builder.defineMacro("__HIP_MEMORY_SCOPE_SYSTEM", "5");
@@ -907,10 +982,10 @@ index cfea6493ced7..d97fd54700b4 100644
                            diag::err_capture_bad_target, Callee, *this)
          << Capture.getVariable();
 diff --git a/clang/lib/Sema/SemaExpr.cpp b/clang/lib/Sema/SemaExpr.cpp
-index 2716b6677105..bec9f855fd05 100644
+index 72e3b01cfea0..fa149834119a 100644
 --- a/clang/lib/Sema/SemaExpr.cpp
 +++ b/clang/lib/Sema/SemaExpr.cpp
-@@ -19027,7 +19027,7 @@ MarkVarDeclODRUsed(ValueDecl *V, SourceLocation Loc, Sema &SemaRef,
+@@ -19110,7 +19110,7 @@ MarkVarDeclODRUsed(ValueDecl *V, SourceLocation Loc, Sema &SemaRef,
        // Diagnose ODR-use of host global variables in device functions.
        // Reference of device global variables in host functions is allowed
        // through shadow variables therefore it is not diagnosed.
@@ -919,6 +994,20 @@ index 2716b6677105..bec9f855fd05 100644
          SemaRef.targetDiag(Loc, diag::err_ref_bad_target)
              << /*host*/ 2 << /*variable*/ 1 << Var << UserTarget;
          SemaRef.targetDiag(Var->getLocation(),
+diff --git a/clang/lib/Sema/SemaStmtAsm.cpp b/clang/lib/Sema/SemaStmtAsm.cpp
+index 2acb269f0423..83351b703c15 100644
+--- a/clang/lib/Sema/SemaStmtAsm.cpp
++++ b/clang/lib/Sema/SemaStmtAsm.cpp
+@@ -271,7 +271,8 @@ StmtResult Sema::ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
+       OutputName = Names[i]->getName();
+ 
+     TargetInfo::ConstraintInfo Info(Literal->getString(), OutputName);
+-    if (!Context.getTargetInfo().validateOutputConstraint(Info)) {
++    if (!Context.getTargetInfo().validateOutputConstraint(Info) &&
++        !(LangOpts.HIPStdPar && LangOpts.CUDAIsDevice)) {
+       targetDiag(Literal->getBeginLoc(),
+                  diag::err_asm_invalid_output_constraint)
+           << Info.getConstraintStr();
 diff --git a/clang/test/CodeGenStdPar/unannotated-functions-get-emitted.cpp b/clang/test/CodeGenStdPar/unannotated-functions-get-emitted.cpp
 new file mode 100644
 index 000000000000..87f4ea0243cb
@@ -945,6 +1034,23 @@ index 000000000000..87f4ea0243cb
 +  *a = b;
 +}
 \ No newline at end of file
+diff --git a/clang/test/CodeGenStdPar/unsupported-ASM.cpp b/clang/test/CodeGenStdPar/unsupported-ASM.cpp
+new file mode 100644
+index 000000000000..3ff747633d30
+--- /dev/null
++++ b/clang/test/CodeGenStdPar/unsupported-ASM.cpp
+@@ -0,0 +1,11 @@
++
++// RUN: %clang_cc1 -triple amdgcn-amd-amdhsa -aux-triple x86_64-unknown-linux-gnu \
++// RUN:   --stdpar -x hip -emit-llvm -fcuda-is-device -o - %s | FileCheck %s
++
++#define __global__ __attribute__((global))
++
++__global__ void foo(int i) {
++    asm ("addl %2, %1; seto %b0" : "=q" (i), "+g" (i) : "r" (i));
++}
++
++// CHECK: declare void @__ASM__stdpar_unsupported([{{.*}}])
 diff --git a/clang/test/CodeGenStdPar/unsupported-builtins.cpp b/clang/test/CodeGenStdPar/unsupported-builtins.cpp
 new file mode 100644
 index 000000000000..96a04359e5ae
@@ -1017,13 +1123,12 @@ new file mode 100644
 index 000000000000..e69de29bb2d1
 diff --git a/clang/test/SemaStdPar/device-can-call-host.cpp b/clang/test/SemaStdPar/device-can-call-host.cpp
 new file mode 100644
-index 000000000000..60f7a2ebbc6a
+index 000000000000..5d19c2bd63dd
 --- /dev/null
 +++ b/clang/test/SemaStdPar/device-can-call-host.cpp
-@@ -0,0 +1,91 @@
-+// RUN: %clang %s --stdpar --stdpar-path=%S/Inputs \
-+// RUN:   --stdpar-thrust-path=%S/Inputs --stdpar-prim-path=%S/Inputs \
-+// RUN:   --offload-device-only -emit-llvm -o /dev/null -Xclang -verify
+@@ -0,0 +1,93 @@
++// RUN: %clang_cc1 -x hip %s -stdpar -triple amdgcn-amd-amdhsa --std=c++17 \
++// RUN:   -fcuda-is-device -emit-llvm -o /dev/null -verify
 +
 +// Note: These would happen implicitly, within the implementation of the
 +//       accelerator specific algorithm library, and not from user code.
@@ -1032,6 +1137,9 @@ index 000000000000..60f7a2ebbc6a
 +// functions are fine.
 +
 +// expected-no-diagnostics
++
++#define __device__ __attribute__((device))
++#define __global__ __attribute__((global))
 +
 +extern "C" void host_fn() {}
 +
@@ -1178,7 +1286,7 @@ index 576d0f3ff442..50e0f9756acc 100644
    Target
    TransformUtils
 diff --git a/llvm/lib/Passes/PassBuilder.cpp b/llvm/lib/Passes/PassBuilder.cpp
-index bb6b40b14f8b..038f454328f1 100644
+index 2b46a82c769a..ffa3fc0895d6 100644
 --- a/llvm/lib/Passes/PassBuilder.cpp
 +++ b/llvm/lib/Passes/PassBuilder.cpp
 @@ -220,6 +220,7 @@
@@ -1190,7 +1298,7 @@ index bb6b40b14f8b..038f454328f1 100644
  #include "llvm/Transforms/Scalar/StructurizeCFG.h"
  #include "llvm/Transforms/Scalar/TLSVariableHoist.h"
 diff --git a/llvm/lib/Passes/PassBuilderPipelines.cpp b/llvm/lib/Passes/PassBuilderPipelines.cpp
-index 660cb2e974d7..c906640c63ce 100644
+index aa42fb377114..0d12a96ac9c5 100644
 --- a/llvm/lib/Passes/PassBuilderPipelines.cpp
 +++ b/llvm/lib/Passes/PassBuilderPipelines.cpp
 @@ -118,6 +118,7 @@
@@ -1202,10 +1310,10 @@ index 660cb2e974d7..c906640c63ce 100644
  #include "llvm/Transforms/Utils/AssumeBundleBuilder.h"
  #include "llvm/Transforms/Utils/CanonicalizeAliases.h"
 diff --git a/llvm/lib/Passes/PassRegistry.def b/llvm/lib/Passes/PassRegistry.def
-index 3907a5fdee25..7bed83f89667 100644
+index 63704d2d1b0c..fc261068cf38 100644
 --- a/llvm/lib/Passes/PassRegistry.def
 +++ b/llvm/lib/Passes/PassRegistry.def
-@@ -107,6 +107,9 @@ MODULE_PASS("rpo-function-attrs", ReversePostOrderFunctionAttrsPass())
+@@ -108,6 +108,9 @@ MODULE_PASS("rpo-function-attrs", ReversePostOrderFunctionAttrsPass())
  MODULE_PASS("sample-profile", SampleProfileLoaderPass())
  MODULE_PASS("scc-oz-module-inliner",
    buildInlinerPipeline(OptimizationLevel::Oz, ThinOrFullLTOPhase::None))
@@ -1216,7 +1324,7 @@ index 3907a5fdee25..7bed83f89667 100644
  MODULE_PASS("strip-dead-debug-info", StripDeadDebugInfoPass())
  MODULE_PASS("pseudo-probe", SampleProfileProbePass(TM))
 diff --git a/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp b/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp
-index bad6976f1ff9..fbf96a8f4a1e 100644
+index 43c9f183f17b..267247f3296b 100644
 --- a/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp
 +++ b/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp
 @@ -57,6 +57,7 @@
@@ -1227,7 +1335,7 @@ index bad6976f1ff9..fbf96a8f4a1e 100644
  #include "llvm/Transforms/Utils.h"
  #include "llvm/Transforms/Utils/SimplifyLibCalls.h"
  #include "llvm/Transforms/Vectorize/LoadStoreVectorizer.h"
-@@ -349,6 +350,11 @@ static cl::opt<bool> EnableRewritePartialRegUses(
+@@ -343,6 +344,11 @@ static cl::opt<bool> EnableRewritePartialRegUses(
      cl::desc("Enable rewrite partial reg uses pass"), cl::init(false),
      cl::Hidden);
  
@@ -1239,9 +1347,9 @@ index bad6976f1ff9..fbf96a8f4a1e 100644
  extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAMDGPUTarget() {
    // Register the target
    RegisterTargetMachine<R600TargetMachine> X(getTheR600Target());
-@@ -689,6 +695,8 @@ void AMDGPUTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB) {
+@@ -685,6 +691,8 @@ void AMDGPUTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB) {
          if (EnableLibCallSimplify && Level != OptimizationLevel::O0)
-           FPM.addPass(AMDGPUSimplifyLibCallsPass(*this));
+           FPM.addPass(AMDGPUSimplifyLibCallsPass());
          PM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
 +        if (EnableStdPar)
 +          PM.addPass(StdParAcceleratorCodeSelectionPass());
@@ -1278,10 +1386,10 @@ index 000000000000..1ef32bac16df
 +  TransformUtils)
 diff --git a/llvm/lib/Transforms/StdPar/StdPar.cpp b/llvm/lib/Transforms/StdPar/StdPar.cpp
 new file mode 100644
-index 000000000000..ad3c0a980f85
+index 000000000000..ec693cae3714
 --- /dev/null
 +++ b/llvm/lib/Transforms/StdPar/StdPar.cpp
-@@ -0,0 +1,260 @@
+@@ -0,0 +1,297 @@
 +//===------ StdPar.cpp - C++ Standard Parallelism Support Passes ----------===//
 +//
 +// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -1330,6 +1438,7 @@ index 000000000000..ad3c0a980f85
 +#include "llvm/Analysis/CallGraph.h"
 +#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 +#include "llvm/IR/Constants.h"
++#include "llvm/IR/DebugInfoMetadata.h"
 +#include "llvm/IR/Function.h"
 +#include "llvm/IR/Module.h"
 +#include "llvm/Transforms/Utils/ModuleUtils.h"
@@ -1345,12 +1454,47 @@ index 000000000000..ad3c0a980f85
 +  toErase.eraseFromParent();
 +}
 +
++static inline void CheckIfSupported(GlobalVariable &G) {
++  if (!G.isThreadLocal())
++    return;
++
++  G.dropDroppableUses();
++
++  if (!G.hasNUsesOrMore(1))
++    return;
++
++  std::string W;
++  raw_string_ostream OS(W);
++
++  OS << "Accelerator does not support the thread_local variable "
++    << G.getName();
++
++  const User *U = *G.user_begin();
++  const Instruction *I = nullptr;
++  while (!(I = dyn_cast<Instruction>(U)))
++    U = *U->user_begin();
++
++  auto Caller = I->getParent()->getParent();
++
++  return G.getContext().diagnose(
++    DiagnosticInfoUnsupported(*Caller, W, I->getDebugLoc(), DS_Error));
++}
++
 +static inline void maybeHandleGlobals(Module &M) {
-+  for (auto &&G : M.globals()) // TODO: should we handle these in the FE?
-+    if (G.getLinkage() == GlobalVariable::ExternalLinkage) {
-+      G.setLinkage(GlobalVariable::ExternalWeakLinkage);
-+      G.setExternallyInitialized(true);
-+    }
++  unsigned GlobAS = M.getDataLayout().getDefaultGlobalsAddressSpace();
++  for (auto &&G : M.globals()) { // TODO: should we handle these in the FE?
++    CheckIfSupported(G);
++
++    if (G.isConstant())
++      continue;
++    if (G.getAddressSpace() != GlobAS)
++      continue;
++    if (G.getLinkage() != GlobalVariable::ExternalLinkage)
++      continue;
++
++    G.setLinkage(GlobalVariable::ExternalWeakLinkage);
++    G.setExternallyInitialized(true);
++  }
 +}
 +
 +static inline void clearModule(Module &M) { // TODO: simplify.
@@ -1400,7 +1544,7 @@ index 000000000000..ad3c0a980f85
 +    }
 +}
 +
-+static inline void CheckIfSupported(const Function *F) {
++static inline void CheckIfSupported(const Function *F, const CallBase *CB) {
 +  const auto Dx = F->getName().rfind("__stdpar_unsupported");
 +
 +  if (Dx == StringRef::npos)
@@ -1411,15 +1555,16 @@ index 000000000000..ad3c0a980f85
 +  std::string W;
 +  raw_string_ostream OS(W);
 +
-+  OS << "Accelerator does not support the " << N << " function.";
++  if (N == "__ASM")
++    OS << "Accelerator does not support the ASM block:\n"
++      << cast<ConstantDataArray>(CB->getArgOperand(0))->getAsCString();
++  else
++    OS << "Accelerator does not support the " << N << " function.";
 +
-+  for (auto &&U : F->users())
-+    if (auto I = dyn_cast_or_null<Instruction>(U)) {
-+      auto Caller = I->getParent()->getParent();
++  auto Caller = CB->getParent()->getParent();
 +
-+      return Caller->getContext().diagnose(
-+        DiagnosticInfoUnsupported(*Caller, W, I->getDebugLoc(), DS_Error));
-+    }
++  return Caller->getContext().diagnose(
++        DiagnosticInfoUnsupported(*Caller, W, CB->getDebugLoc(), DS_Error));
 +}
 +
 +PreservedAnalyses
@@ -1446,7 +1591,7 @@ index 000000000000..ad3c0a980f85
 +        if (Reachable.contains(N.second->getFunction()))
 +          continue;
 +
-+        CheckIfSupported(N.second->getFunction());
++        CheckIfSupported(N.second->getFunction(), dyn_cast<CallBase>(*N.first));
 +
 +        Reachable.insert(N.second->getFunction());
 +        Tmp.push_back(N.second->getFunction());
@@ -2061,6 +2206,25 @@ index 000000000000..1384ba897ef7
 +
 +declare ptr @__libc_memalign(i64 noundef, i64 noundef)
 \ No newline at end of file
+diff --git a/llvm/test/Transforms/StdPar/unsupported-asm.ll b/llvm/test/Transforms/StdPar/unsupported-asm.ll
+new file mode 100644
+index 000000000000..784e80af24c0
+--- /dev/null
++++ b/llvm/test/Transforms/StdPar/unsupported-asm.ll
+@@ -0,0 +1,12 @@
++; RUN: not opt -S -mtriple=amdgcn-amd-amdhsa -passes=stdpar-select-accelerator-code \
++; RUN: %s 2>&1 | FileCheck %s
++
++; CHECK: error: {{.*}} in function foo void (): Accelerator does not support the ASM block:
++; CHECK-NEXT: {{.*}}Invalid ASM block{{.*}}
++define amdgpu_kernel void @foo() {
++entry:
++  call void @__ASM__stdpar_unsupported([18 x i8] c"Invalid ASM block\00")
++  ret void
++}
++
++declare void @__ASM__stdpar_unsupported([18 x i8])
+\ No newline at end of file
 diff --git a/llvm/test/Transforms/StdPar/unsupported-builtins.ll b/llvm/test/Transforms/StdPar/unsupported-builtins.ll
 new file mode 100644
 index 000000000000..23102963dc5f
@@ -2079,3 +2243,43 @@ index 000000000000..23102963dc5f
 +
 +declare void @__builtin_ia32_pause__stdpar_unsupported()
 \ No newline at end of file
+diff --git a/llvm/test/Transforms/StdPar/unsupported-thread-local-direct-use.ll b/llvm/test/Transforms/StdPar/unsupported-thread-local-direct-use.ll
+new file mode 100644
+index 000000000000..6dc5a3cfcd6c
+--- /dev/null
++++ b/llvm/test/Transforms/StdPar/unsupported-thread-local-direct-use.ll
+@@ -0,0 +1,14 @@
++; RUN: not opt -S -mtriple=amdgcn-amd-amdhsa -passes=stdpar-select-accelerator-code \
++; RUN:   %s 2>&1 | FileCheck %s
++
++@tls = hidden thread_local addrspace(1) global i32 0, align 4
++
++; CHECK: error: {{.*}} in function direct_use void (): Accelerator does not support the thread_local variable tls
++define amdgpu_kernel void @direct_use() {
++entry:
++  %0 = call align 4 ptr addrspace(1) @llvm.threadlocal.address.p1(ptr addrspace(1) @tls)
++  %1 = load i32, ptr addrspace(1) %0, align 4
++  ret void
++}
++
++declare nonnull ptr addrspace(1) @llvm.threadlocal.address.p1(ptr addrspace(1) nonnull)
+diff --git a/llvm/test/Transforms/StdPar/unsupported-thread-local-indirect-use.ll b/llvm/test/Transforms/StdPar/unsupported-thread-local-indirect-use.ll
+new file mode 100644
+index 000000000000..9694cb459c00
+--- /dev/null
++++ b/llvm/test/Transforms/StdPar/unsupported-thread-local-indirect-use.ll
+@@ -0,0 +1,14 @@
++; RUN: not opt -S -mtriple=amdgcn-amd-amdhsa -passes=stdpar-select-accelerator-code \
++; RUN:   %s 2>&1 | FileCheck %s
++
++@tls = hidden thread_local addrspace(1) global i32 0, align 4
++
++; CHECK: error: {{.*}} in function indirect_use void (): Accelerator does not support the thread_local variable tls
++define amdgpu_kernel void @indirect_use() {
++entry:
++  %0 = call align 4 ptr @llvm.threadlocal.address.p0(ptr addrspacecast (ptr addrspace(1) @tls to ptr))
++  %1 = load i32, ptr %0, align 4
++  ret void
++}
++
++declare nonnull ptr @llvm.threadlocal.address.p0(ptr nonnull)
