@@ -289,29 +289,58 @@
 
     namespace hipstd
     {
-        // TODO: temporarily remove the constraint on iterator type as it was
-        //       too restrictive, and requires a reformulation.
-        template<typename I>
-        using IsRandomAccessIterator = std::true_type;
-        // std::conjunction<
-        //     std::negation<std::is_same<
-        //         typename std::iterator_traits<I>::iterator_category,
-        //         std::input_iterator_tag>>,
-        //     std::negation<std::is_same<
-        //         typename std::iterator_traits<I>::iterator_category,
-        //         std::output_iterator_tag>>,
-        //     std::negation<std::is_same<
-        //         typename std::iterator_traits<I>::iterator_category,
-        //         std::forward_iterator_tag>>,
-        //     std::negation<std::is_same<
-        //         typename std::iterator_traits<I>::iterator_category,
-        //         std::bidirectional_iterator_tag>>>;
-        template<typename I>
-        inline constexpr bool IsRandomAccessIterator_v =
-            IsRandomAccessIterator<I>::value;
+        template<typename... Cs>
+        inline
+        constexpr
+        bool is_offloadable_callable() noexcept
+        {
+            return std::conjunction_v<
+                std::negation<std::is_pointer<Cs>>...,
+                std::negation<std::is_member_function_pointer<Cs>>...>;
+        }
+
         template<typename... Is>
-        inline constexpr bool AreRandomAccessIterators_v =
-            std::conjunction_v<IsRandomAccessIterator<Is>...>;
+        inline
+        constexpr
+        bool is_offloadable_iterator() noexcept
+        {
+            return std::conjunction_v<
+                std::negation<std::is_same<
+                    typename std::iterator_traits<Is>::iterator_category,
+                    std::input_iterator_tag>>...,
+                std::negation<std::is_same<
+                    typename std::iterator_traits<Is>::iterator_category,
+                    std::output_iterator_tag>>...,
+                std::negation<std::is_same<
+                    typename std::iterator_traits<Is>::iterator_category,
+                    std::forward_iterator_tag>>...,
+                std::negation<std::is_same<
+                    typename std::iterator_traits<Is>::iterator_category,
+                    std::bidirectional_iterator_tag>>...>;
+        }
+
+        template<typename... Cs>
+        inline
+        constexpr
+        __attribute__((diagnose_if(
+            true,
+            "HIP Standard Parallelism does not support passing pointers to "
+                "function as callable arguments, execution will not be "
+                "offloaded.",
+            "warning")))
+        void unsupported_callable_type() noexcept
+        {}
+
+        template<typename... Is>
+        inline
+        constexpr
+        __attribute__((diagnose_if(
+            true,
+            "HIP Standard Parallelism requires random access iterators, "
+                "execution will not be offloaded.",
+            "warning")))
+        void unsupported_iterator_category() noexcept
+        {}
     }
 
     namespace std
@@ -321,8 +350,7 @@
         template<
             typename I,
             typename O,
-            enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         O adjacent_difference(
             execution::parallel_unsequenced_policy, I fi, I li, O fo)
@@ -333,9 +361,27 @@
         template<
             typename I,
             typename O,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O adjacent_difference(
+            execution::parallel_unsequenced_policy, I fi, I li, O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return
+                ::std::adjacent_difference(::std::execution::par, fi, li, fo);
+        }
+
+
+        template<
+            typename I,
+            typename O,
             typename Op,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
         inline
         O adjacent_difference(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
@@ -343,13 +389,37 @@
             return ::thrust::adjacent_difference(
                 ::thrust::device, fi, li, fo, ::std::move(op));
         }
+
+        template<
+            typename I,
+            typename O,
+            typename Op,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+        inline
+        O adjacent_difference(
+            execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<Op>()) {
+                ::hipstd::unsupported_callable_type<Op>();
+            }
+
+            return ::std::adjacent_difference(
+                ::std::execution::par, fi, li, fo, ::std::move(op));
+        }
         // END ADJACENT_DIFFERENCE
 
         // BEGIN ADJACENT_FIND
         // https://en.cppreference.com/w/cpp/algorithm/adjacent_find
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         I adjacent_find(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -364,7 +434,22 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        I adjacent_find(execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::adjacent_find(::std::execution::par, f, l);
+        }
+
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         I adjacent_find(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
@@ -375,6 +460,27 @@
 
             return (r.first == l) ? l : r.second;
         }
+
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        I adjacent_find(execution::parallel_unsequenced_policy, I f, I l, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::adjacent_find(
+                ::std::execution::par, f, l, ::std::move(p));
+        }
         // END ADJACENT_FIND
 
         // BEGIN ALL_OF
@@ -382,11 +488,33 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         bool all_of(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
-            return ::thrust::all_of(f, l, ::std::move(p));
+            return ::thrust::all_of(::thrust::device, f, l, ::std::move(p));
+        }
+
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        bool all_of(execution::parallel_unsequenced_policy, I f, I l, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::all_of(::std::execution::par, f, l, ::std::move(p));
         }
         // END ALL_OF
 
@@ -395,11 +523,33 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         bool any_of(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
             return ::thrust::any_of(::thrust::device, f, l, ::std::move(p));
+        }
+
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        bool any_of(execution::parallel_unsequenced_policy, I f, I l, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::any_of(::std::execution::par, f, l, ::std::move(p));
         }
         // END ANY_OF
 
@@ -408,11 +558,25 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         O copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
         {
             return ::thrust::copy(::thrust::device, fi, li, fo);
+        }
+
+        template<
+            typename I,
+            typename O,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::copy(::std::execution::par, fi, li, fo);
         }
         // END COPY
 
@@ -422,12 +586,37 @@
             typename I,
             typename O,
             typename P,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         O copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo, P p)
         {
             return
                 ::thrust::copy_if(::thrust::device, fi, li, fo, ::std::move(p));
+        }
+
+        template<
+            typename I,
+            typename O,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        O copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::copy_if(
+                ::std::execution::par, fi, li, fo, ::std::move(p));
         }
         // END COPY_IF
 
@@ -437,33 +626,92 @@
             typename I,
             typename N,
             typename O,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         O copy_n(execution::parallel_unsequenced_policy, I fi, N n, O fo)
         {
             return ::thrust::copy_n(::thrust::device, fi, n, fo);
         }
+
+        template<
+            typename I,
+            typename N,
+            typename O,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O copy_n(execution::parallel_unsequenced_policy, I fi, N n, O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::copy_n(::std::execution::par, fi, n, fo);
+        }
         // END COPY_N
 
         // BEGIN COUNT
         // https://en.cppreference.com/w/cpp/algorithm/count
-        template<typename I, typename T>
+        template<
+            typename I,
+            typename T,
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         typename iterator_traits<I>::difference_type count(
             execution::parallel_unsequenced_policy, I f, I l, const T& x)
         {
             return ::thrust::count(::thrust::device, f, l, x);
         }
+
+        template<
+            typename I,
+            typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        typename iterator_traits<I>::difference_type count(
+            execution::parallel_unsequenced_policy, I f, I l, const T& x)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::count(::std::execution::par, f, l, x);
+        }
         // END COUNT
 
         // BEGIN COUNT_IF
         // https://en.cppreference.com/w/cpp/algorithm/count
-        template<typename I, typename P>
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         typename iterator_traits<I>::difference_type count_if(
             execution::parallel_unsequenced_policy, I f, I l, P p)
         {
             return ::thrust::count_if(::thrust::device, f, l, ::std::move(p));
+        }
+
+         template<
+            typename I,
+            typename O,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        typename iterator_traits<I>::difference_type count_if(
+            execution::parallel_unsequenced_policy, I f, I l, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::count_if(::std::execution::par, f, l, ::std::move(p));
         }
         // END COUNT_IF
 
@@ -471,13 +719,25 @@
         // https://en.cppreference.com/w/cpp/memory/destroy
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void destroy(execution::parallel_unsequenced_policy, I f, I l)
         {
             return ::thrust::for_each(f, l, [](auto& x) {
                 destroy_at(addressof(x));
             });
+        }
+
+        template<
+            typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void destroy(execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::destroy(::std::execution::par, f, l);
         }
         // END DESTROY
 
@@ -486,13 +746,26 @@
         template<
             typename I,
             typename N,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void destroy_n(execution::parallel_unsequenced_policy, I f, N n)
         {
             return ::thrust::for_each_n(f, n, [](auto& x) {
                 destroy_at(addressof(x));
             });
+        }
+
+        template<
+            typename I,
+            typename N,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void destroy_n(execution::parallel_unsequenced_policy, I f, N n)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::destroy_n(::std::execution::par, f, n);
         }
         // END DESTROY_N
 
@@ -501,8 +774,7 @@
         template<
             typename I0,
             typename I1,
-            enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
         inline
         bool equal(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
         {
@@ -512,9 +784,25 @@
         template<
             typename I0,
             typename I1,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
+        inline
+        bool equal(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category>();
+
+            return ::std::equal(::std::execution::par, f0, l0, f1);
+        }
+
+        template<
+            typename I0,
+            typename I1,
             typename R,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         bool equal(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, R r)
@@ -526,8 +814,30 @@
         template<
             typename I0,
             typename I1,
+            typename R,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                !::hipstd::is_offloadable_iterator<I0, I1>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        bool equal(
+            execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+            return
+                ::std::equal(::std::execution::par, f0, l0, f1, ::std::move(r));
+        }
+
+        template<
+            typename I0,
+            typename I1,
+            enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
         inline
         bool equal(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
@@ -540,9 +850,26 @@
         template<
             typename I0,
             typename I1,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
+        inline
+        bool equal(
+            execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category>();
+
+            return ::std::equal(::std::execution::par, f0, l0, f1, l1);
+        }
+
+        template<
+            typename I0,
+            typename I1,
             typename R,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         bool equal(
             execution::parallel_unsequenced_policy,
@@ -557,6 +884,34 @@
             return ::thrust::equal(
                 ::thrust::device, f0, l0, f1, ::std::move(r));
         }
+
+        template<
+            typename I0,
+            typename I1,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        bool equal(
+            execution::parallel_unsequenced_policy,
+            I0 f0,
+            I0 l0,
+            I1 f1,
+            I1 l1,
+            R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+            return ::std::equal(
+                ::std::execution::par, f0, l0, f1, l1, ::std::move(r));
+        }
         // END EQUAL
 
         // BEGIN EXCLUSIVE_SCAN
@@ -565,7 +920,7 @@
             typename I,
             typename O,
             typename T,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         O exclusive_scan(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, T x)
@@ -578,8 +933,27 @@
             typename I,
             typename O,
             typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O exclusive_scan(
+            execution::parallel_unsequenced_policy, I fi, I li, O fo, T x)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename std::iterator_traits<I>::iterator_category,
+                typename std::iterator_traits<O>::iterator_category>();
+
+            return ::std::exclusive_scan(
+                ::std::execution::par, fi, li, fo, ::std::move(x));
+        }
+
+        template<
+            typename I,
+            typename O,
+            typename T,
             typename Op,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
         inline
         O exclusive_scan(
             execution::parallel_unsequenced_policy,
@@ -592,6 +966,41 @@
             return ::thrust::exclusive_scan(
                 ::thrust::device, fi, li, fo, ::std::move(x), ::std::move(op));
         }
+
+        template<
+            typename I,
+            typename O,
+            typename T,
+            typename Op,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+        inline
+        O exclusive_scan(
+            execution::parallel_unsequenced_policy,
+            I fi,
+            I li,
+            O fo,
+            T x,
+            Op op)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<Op>()) {
+                ::hipstd::unsupported_callable_type<Op>();
+            }
+
+            return ::std::exclusive_scan(
+                ::std::execution::par,
+                fi,
+                li,
+                fo,
+                ::std::move(x),
+                ::std::move(op));
+        }
         // END EXCLUSIVE_SCAN
 
         // BEGIN FILL
@@ -599,11 +1008,24 @@
         template<
             typename I,
             typename T,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void fill(execution::parallel_unsequenced_policy, I f, I l, const T& x)
         {
             return ::thrust::fill(::thrust::device, f, l, x);
+        }
+
+        template<
+            typename I,
+            typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void fill(execution::parallel_unsequenced_policy, I f, I l, const T& x)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::fill(::std::execution::par, f, l, x);
         }
         // END FILL
 
@@ -613,12 +1035,27 @@
             typename I,
             typename N,
             typename T,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void fill_n(
             execution::parallel_unsequenced_policy, I f, N n, const T& x)
         {
             return ::thrust::fill_n(::thrust::device, f, n, x);
+        }
+
+        template<
+            typename I,
+            typename N,
+            typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void fill_n(
+            execution::parallel_unsequenced_policy, I f, N n, const T& x)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::fill_n(::std::execution::par, f, n, x);
         }
         // END FILL_N
 
@@ -627,11 +1064,24 @@
         template<
             typename I,
             typename T,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         I find(execution::parallel_unsequenced_policy, I f, I l, const T& x)
         {
             return ::thrust::find(::thrust::device, f, l, x);
+        }
+
+        template<
+            typename I,
+            typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        I find(execution::parallel_unsequenced_policy, I f, I l, const T& x)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::find(::std::execution::par, f, l, x);
         }
         // END FIND
 
@@ -650,11 +1100,33 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         I find_if(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
             return ::thrust::find_if(::thrust::device, f, l, ::std::move(p));
+        }
+
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        I find_if(execution::parallel_unsequenced_policy, I f, I l, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::find_if(::std::execution::par, f, l, ::std::move(p));
         }
         // END FIND_IF
 
@@ -663,12 +1135,35 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         I find_if_not(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
             return
                 ::thrust::find_if_not(::thrust::device, f, l, ::std::move(p));
+        }
+
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        I find_if_not(execution::parallel_unsequenced_policy, I f, I l, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return
+                ::std::find_if_not(::std::execution::par, f, l, ::std::move(p));
         }
         // END FIND_IF_NOT
 
@@ -677,11 +1172,34 @@
         template<
             typename I,
             typename F,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<F>()>* = nullptr>
         inline
         void for_each(execution::parallel_unsequenced_policy, I f, I l, F fn)
         {
             return ::thrust::for_each(::thrust::device, f, l, ::std::move(fn));
+        }
+
+        template<
+            typename I,
+            typename F,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<F>()>* = nullptr>
+        inline
+        I for_each(execution::parallel_unsequenced_policy, I f, I l, F fn)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<F>()) {
+                ::hipstd::unsupported_callable_type<F>();
+            }
+
+            return
+                ::std::for_each(::std::execution::par, f, l, ::std::move(fn));
         }
         // END FOR_EACH
 
@@ -691,12 +1209,36 @@
             typename I,
             typename N,
             typename F,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<F>()>* = nullptr>
         inline
         I for_each_n(execution::parallel_unsequenced_policy, I f, N n, F fn)
         {
             return
                 ::thrust::for_each_n(::thrust::device, f, n, ::std::move(fn));
+        }
+
+        template<
+            typename I,
+            typename N,
+            typename F,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<F>()>* = nullptr>
+        inline
+        I for_each(execution::parallel_unsequenced_policy, I f, N n, F fn)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<F>()) {
+                ::hipstd::unsupported_callable_type<F>();
+            }
+
+            return
+                ::std::for_each_n(::std::execution::par, f, n, ::std::move(fn));
         }
         // END FOR_EACH_N
 
@@ -705,11 +1247,34 @@
         template<
             typename I,
             typename G,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<G>()>* = nullptr>
         inline
         void generate(execution::parallel_unsequenced_policy, I f, I l, G g)
         {
             return ::thrust::generate(::thrust::device, f, l, ::std::move(g));
+        }
+
+        template<
+            typename I,
+            typename G,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<G>()>* = nullptr>
+        inline
+        void generate_n(execution::parallel_unsequenced_policy, I f, I l, G g)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<G>()) {
+                ::hipstd::unsupported_callable_type<G>();
+            }
+
+            return
+                ::std::generate_n(::std::execution::par, f, l, ::std::move(g));
         }
         // END GENERATE
 
@@ -719,11 +1284,35 @@
             typename I,
             typename N,
             typename G,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<G>()>* = nullptr>
         inline
         void generate_n(execution::parallel_unsequenced_policy, I f, N n, G g)
         {
             return ::thrust::generate_n(::thrust::device, f, n, ::std::move(g));
+        }
+
+        template<
+            typename I,
+            typename N,
+            typename G,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<G>()>* = nullptr>
+        inline
+        void generate_n(execution::parallel_unsequenced_policy, I f, N n, G g)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<G>()) {
+                ::hipstd::unsupported_callable_type<G>();
+            }
+
+            return
+                ::std::generate_n(::std::execution::par, f, n, ::std::move(g));
         }
         // END GENERATE_N
 
@@ -732,8 +1321,7 @@
         template<
             typename I0,
             typename I1,
-            enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
         inline
         bool includes(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
@@ -747,9 +1335,26 @@
         template<
             typename I0,
             typename I1,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
+        inline
+        bool includes(
+            execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category>();
+
+            return ::std::includes(::std::execution::par, f0, l0, f1, l1);
+        }
+
+        template<
+            typename I0,
+            typename I1,
             typename R,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         bool includes(
             execution::parallel_unsequenced_policy,
@@ -764,6 +1369,35 @@
             return ::thrust::set_difference(
                 ::thrust::device, f1, l1, f0, l0, cnt, ::std::move(r)) == cnt;
         }
+
+        template<
+            typename I0,
+            typename I1,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        bool includes(
+            execution::parallel_unsequenced_policy,
+            I0 f0,
+            I0 l0,
+            I1 f1,
+            I1 l1,
+            R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::includes(
+                ::std::execution::par, f1, l1, f0, l0, ::std::move(r));
+        }
         // END INCLUDES
 
         // BEGIN INCLUSIVE_SCAN
@@ -772,7 +1406,7 @@
             typename I,
             typename O,
             typename T,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         O inclusive_scan(
             execution::parallel_unsequenced_policy, I fi, I li, O fo)
@@ -783,8 +1417,26 @@
         template<
             typename I,
             typename O,
+            typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O inclusive_scan(
+            execution::parallel_unsequenced_policy, I fi, I li, O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::inclusive_scan(::std::execution::par, fi, li, fo);
+        }
+
+        template<
+            typename I,
+            typename O,
             typename Op,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
         inline
         O inclusive_scan(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
@@ -797,8 +1449,34 @@
             typename I,
             typename O,
             typename Op,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+        inline
+        O inclusive_scan(
+            execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<Op>()) {
+                ::hipstd::unsupported_callable_type<Op>();
+            }
+
+            return ::std::inclusive_scan(
+                ::std::execution::par, fi, li, fo, ::std::move(op));
+        }
+
+        template<
+            typename I,
+            typename O,
+            typename Op,
             typename T,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
         inline
         O inclusive_scan(
             execution::parallel_unsequenced_policy,
@@ -823,6 +1501,41 @@
                 return op(x, y);
             });
         }
+
+        template<
+            typename I,
+            typename O,
+            typename Op,
+            typename T,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+        inline
+        O inclusive_scan(
+            execution::parallel_unsequenced_policy,
+            I fi,
+            I li,
+            O fo,
+            Op op,
+            T x)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<Op>()) {
+                ::hipstd::unsupported_callable_type<Op>();
+            }
+
+            return ::std::inclusive_scan(
+                ::std::execution::par,
+                fi,
+                li,
+                fo,
+                ::std::move(op),
+                ::std::move(x));
+        }
         // END INCLUSIVE_SCAN
 
         // BEGIN INPLACE_MERGE
@@ -845,7 +1558,9 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         bool is_partitioned(
             execution::parallel_unsequenced_policy, I f, I l, P p)
@@ -853,13 +1568,35 @@
             return ::thrust::is_partitioned(
                 ::thrust::device, f, l, ::std::move(p));
         }
+
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        bool is_partitioned(
+            execution::parallel_unsequenced_policy, I f, I l, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::is_partitioned(
+                ::std::execution::par, f, l, ::std::move(p));
+        }
         // END IS_PARTITIONED
 
         // BEGIN IS_SORTED
         // https://en.cppreference.com/w/cpp/algorithm/is_sorted
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         bool is_sorted(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -868,12 +1605,47 @@
 
         template<
             typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        bool is_sorted(execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::is_sorted(::std::execution::par, f, l);
+        }
+
+        template<
+            typename I,
             typename R,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         bool is_sorted(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
             return ::thrust::is_sorted(::thrust::device, f, l, ::std::move(r));
+        }
+
+        template<
+            typename I,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        bool is_sorted(execution::parallel_unsequenced_policy, I f, I l, R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return
+                ::std::is_sorted(::std::execution::par, f, l, ::std::move(r));
         }
         // END IS_SORTED
 
@@ -881,7 +1653,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/is_sorted_until
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -890,13 +1662,48 @@
 
         template<
             typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::is_sorted_until(::std::execution::par, f, l);
+        }
+
+        template<
+            typename I,
             typename R,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
             return ::thrust::is_sorted_until(
                 ::thrust::device, f, l, ::std::move(r));
+        }
+
+        template<
+            typename I,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l, R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::is_sorted_until(
+                ::std::execution::par, f, l, ::std::move(r));
         }
         // END IS_SORTED_UNTIL
 
@@ -905,8 +1712,7 @@
         template<
             typename I0,
             typename I1,
-            enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
         inline
         bool lexicographical_compare(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
@@ -928,9 +1734,26 @@
         template<
             typename I0,
             typename I1,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
+        inline
+        bool lexicographical_compare(
+            execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category>();
+
+            return ::std::lexicographical_compare(
+                ::std::execution::par, f0, l0, f1, l1);
+        }
+
+        template<
+            typename I0,
+            typename I1,
             typename R,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         bool lexicographical_compare(
             execution::parallel_unsequenced_policy,
@@ -958,13 +1781,42 @@
 
             return r(*m.first, *m.second);
         }
+
+        template<
+            typename I0,
+            typename I1,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        bool lexicographical_compare(
+            execution::parallel_unsequenced_policy,
+            I0 f0,
+            I0 l0,
+            I1 f1,
+            I1 l1,
+            R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::lexicographical_compare(
+                ::std::execution::par, f0, l0, f1, l1, ::std::move(r));
+        }
         // END LEXICOGRAPHICAL_COMPARE
 
         // BEGIN MAX_ELEMENT
         // https://en.cppreference.com/w/cpp/algorithm/max_element
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         I max_element(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -973,13 +1825,48 @@
 
         template<
             typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        I max_element(execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::max_element(::std::execution::par, f, l);
+        }
+
+        template<
+            typename I,
             typename R,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         I max_element(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
             return
                 ::thrust::max_element(::thrust::device, f, l, ::std::move(r));
+        }
+
+        template<
+            typename I,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        I max_element(execution::parallel_unsequenced_policy, I f, I l, R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return
+                ::std::max_element(::std::execution::par, f, l, ::std::move(r));
         }
         // END MAX_ELEMENT
 
@@ -990,7 +1877,7 @@
             typename I1,
             typename O,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
         inline
         O merge(
             execution::parallel_unsequenced_policy,
@@ -1007,9 +1894,33 @@
             typename I0,
             typename I1,
             typename O,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
+        inline
+        O merge(
+            execution::parallel_unsequenced_policy,
+            I0 f0,
+            I0 l0,
+            I1 f1,
+            I1 l1,
+            O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::merge(::std::execution::par, f0, l0, f1, l1, fo);
+        }
+
+        template<
+            typename I0,
+            typename I1,
+            typename O,
             typename R,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1, O>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         O merge(
             execution::parallel_unsequenced_policy,
@@ -1023,13 +1934,45 @@
             return ::thrust::merge(
                 ::thrust::device, f0, l0, f1, l1, fo, ::std::move(r));
         }
+
+        template<
+            typename I0,
+            typename I1,
+            typename O,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1, O>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        O merge(
+            execution::parallel_unsequenced_policy,
+            I0 f0,
+            I0 l0,
+            I1 f1,
+            I1 l1,
+            O fo,
+            R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::merge(
+                ::std::execution::par, f0, l0, f1, l1, fo, ::std::move(r));
+        }
         // END MERGE
 
         // BEGIN MIN_ELEMENT
         // https://en.cppreference.com/w/cpp/algorithm/min_element
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         I min_element(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -1038,13 +1981,48 @@
 
         template<
             typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        I min_element(execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::min_element(::std::execution::par, f, l);
+        }
+
+        template<
+            typename I,
             typename R,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         I min_element(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
             return
                 ::thrust::min_element(::thrust::device, f, l, ::std::move(r));
+        }
+
+        template<
+            typename I,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        I min_element(execution::parallel_unsequenced_policy, I f, I l, R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return
+                ::std::min_element(::std::execution::par, f, l, ::std::move(r));
         }
         // END MIN_ELEMENT
 
@@ -1052,7 +2030,7 @@
         // https://en.cppreference.com/w/cpp/algorithm/minmax_element
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         pair<I, I> minmax_element(
             execution::parallel_unsequenced_policy, I f, I l)
@@ -1064,8 +2042,23 @@
 
         template<
             typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        pair<I, I> minmax_element(
+            execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::minmax_element(::std::execution::par, f, l);
+        }
+
+        template<
+            typename I,
             typename R,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         pair<I, I> minmax_element(
             execution::parallel_unsequenced_policy, I f, I l, R r)
@@ -1075,6 +2068,28 @@
 
             return {::std::move(m), ::std::move(M)};
         }
+
+        template<
+            typename I,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        pair<I, I> minmax_element(
+            execution::parallel_unsequenced_policy, I f, I l, R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::minmax_element(
+                ::std::execution::par, f, l, ::std::move(r));
+        }
         // END MINMAX_ELEMENT
 
         // BEGIN MISMATCH
@@ -1082,8 +2097,7 @@
         template<
             typename I0,
             typename I1,
-            enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
         inline
         pair<I0, I1> mismatch(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
@@ -1096,9 +2110,26 @@
         template<
             typename I0,
             typename I1,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
+        inline
+        pair<I0, I1> mismatch(
+            execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category>();
+
+            return ::std::mismatch(::std::execution::par, f0, l0, f1);
+        }
+
+        template<
+            typename I0,
+            typename I1,
             typename P,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         pair<I0, I1> mismatch(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, P p)
@@ -1112,8 +2143,31 @@
         template<
             typename I0,
             typename I1,
+            typename P,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                !::hipstd::is_offloadable_iterator<I0, I1>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        pair<I0, I1> mismatch(
+            execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::mismatch(
+                ::std::execution::par, f0, l0, f1, ::std::move(p));
+        }
+
+        template<
+            typename I0,
+            typename I1,
+            enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
         inline
         pair<I0, I1> mismatch(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
@@ -1129,9 +2183,26 @@
         template<
             typename I0,
             typename I1,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
+        inline
+        pair<I0, I1> mismatch(
+            execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category>();
+
+            return ::std::mismatch(::std::execution::par, f0, l0, f1, l1);
+        }
+
+        template<
+            typename I0,
+            typename I1,
             typename P,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         pair<I0, I1> mismatch(
             execution::parallel_unsequenced_policy,
@@ -1148,6 +2219,35 @@
 
             return {::std::move(m0), ::std::move(m1)};
         }
+
+        template<
+            typename I0,
+            typename I1,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        pair<I0, I1> mismatch(
+            execution::parallel_unsequenced_policy,
+            I0 f0,
+            I0 l0,
+            I1 f1,
+            I1 l1,
+            P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::mismatch(
+                ::std::execution::par, f0, l0, f1, l1, ::std::move(p));
+        }
         // END MISMATCH
 
         // BEGIN MOVE
@@ -1155,7 +2255,7 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         O move(execution::parallel_unsequenced_policy, I fi, I li, O fo)
         {
@@ -1165,6 +2265,20 @@
                 make_move_iterator(li),
                 fo);
         }
+
+        template<
+            typename I,
+            typename O,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O move(execution::parallel_unsequenced_policy, I fi, I li, O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::move(::std::execution::par, fi, li, fo);
+        }
         // END MOVE
 
         // BEGIN NONE_OF
@@ -1172,11 +2286,33 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         bool none_of(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
             return ::thrust::none_of(::thrust::device, f, l, ::std::move(p));
+        }
+
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        bool none_of(execution::parallel_unsequenced_policy, I f, I l, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::none_of(::std::execution::par, f, l, ::std::move(p));
         }
         // END NONE_OF
 
@@ -1200,11 +2336,34 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         I partition(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
             return ::thrust::partition(::thrust::device, f, l, ::std::move(p));
+        }
+
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        I partition(execution::parallel_unsequenced_policy, I f, I l, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return
+                ::std::partition(::std::execution::par, f, l, ::std::move(p));
         }
         // END PARTITION
 
@@ -1216,7 +2375,8 @@
             typename O1,
             typename P,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I, O0, O1>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I, O0, O1>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         pair<O0, O1> partition_copy(
             execution::parallel_unsequenced_policy,
@@ -1231,13 +2391,44 @@
 
             return {::std::move(r0), ::std::move(r1)};
         }
+
+        template<
+            typename I,
+            typename O0,
+            typename O1,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O0, O1>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        pair<O0, O1> partition_copy(
+            execution::parallel_unsequenced_policy,
+            I f,
+            I l,
+            O0 fo0,
+            O1 fo1,
+            P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O0, O1>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O0>::iterator_category,
+                    typename iterator_traits<O1>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::partition_copy(
+                ::std::execution::par, f, l, fo0, fo1, ::std::move(p));
+        }
         // END PARTITION_COPY
 
         // BEGIN REDUCE
         // https://en.cppreference.com/w/cpp/algorithm/reduce
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         typename iterator_traits<I>::value_type reduce(
             execution::parallel_unsequenced_policy, I f, I l)
@@ -1247,8 +2438,21 @@
 
         template<
             typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        typename iterator_traits<I>::value_type reduce(
+            execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::reduce(::std::execution::par, f, l);
+        }
+
+        template<
+            typename I,
             typename T,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         T reduce(execution::parallel_unsequenced_policy, I f, I l, T x)
         {
@@ -1258,13 +2462,50 @@
         template<
             typename I,
             typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        T reduce(execution::parallel_unsequenced_policy, I f, I l, T x)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::reduce(::std::execution::par, f, l, ::std::move(x));
+        }
+
+        template<
+            typename I,
+            typename T,
             typename Op,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
         inline
         T reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op op)
         {
             return ::thrust::reduce(
                 ::thrust::device, f, l, ::std::move(x), ::std::move(op));
+        }
+
+        template<
+            typename I,
+            typename T,
+            typename Op,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+        inline
+        T reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op op)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<Op>()) {
+                ::hipstd::unsupported_callable_type<Op>();
+            }
+
+            return ::std::reduce(
+                ::std::execution::par, f, l, ::std::move(x), ::std::move(op));
         }
         // END REDUCE
 
@@ -1273,11 +2514,24 @@
         template<
             typename I,
             typename T,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         I remove(execution::parallel_unsequenced_policy, I f, I l, const T& x)
         {
             return ::thrust::remove(::thrust::device, f, l, x);
+        }
+
+        template<
+            typename I,
+            typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        I remove(execution::parallel_unsequenced_policy, I f, I l, const T& x)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::remove(::std::execution::par, f, l, x);
         }
         // END REMOVE
 
@@ -1287,7 +2541,7 @@
             typename I,
             typename O,
             typename T,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         O remove_copy(
             execution::parallel_unsequenced_policy,
@@ -1298,6 +2552,26 @@
         {
             return ::thrust::remove_copy(::thrust::device, fi, li, fo, x);
         }
+
+        template<
+            typename I,
+            typename O,
+            typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O remove_copy(
+            execution::parallel_unsequenced_policy,
+            I fi,
+            I li,
+            O fo,
+            const T& x)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::remove_copy(::std::execution::par, fi, li, fo, x);
+        }
         // END REMOVE_COPY
 
         // BEGIN REMOVE_COPY_IF
@@ -1306,13 +2580,39 @@
             typename I,
             typename O,
             typename P,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         O remove_copy_if(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, P p)
         {
             return ::thrust::remove_copy_if(
                 ::thrust::device, fi, li, fo, ::std::move(p));
+        }
+
+        template<
+            typename I,
+            typename O,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        O remove_copy_if(
+            execution::parallel_unsequenced_policy, I fi, I li, O fo, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::remove_copy_if(
+                ::std::execution::par, fi, li, fo, ::std::move(p));
         }
         // END REMOVE_COPY_IF
 
@@ -1321,11 +2621,34 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         I remove_if(execution::parallel_unsequenced_policy, I f, I l, P p)
         {
             return ::thrust::remove_if(::thrust::device, f, l, ::std::move(p));
+        }
+
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        I remove_if(execution::parallel_unsequenced_policy, I f, I l, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return
+                ::std::remove_if(::std::execution::par, f, l, ::std::move(p));
         }
         // END REMOVE_IF
 
@@ -1334,7 +2657,7 @@
         template<
             typename I,
             typename T,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void replace(
             execution::parallel_unsequenced_policy,
@@ -1345,6 +2668,24 @@
         {
             return ::thrust::replace(::thrust::device, f, l, x, y);
         }
+
+        template<
+            typename I,
+            typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void replace(
+            execution::parallel_unsequenced_policy,
+            I f,
+            I l,
+            const T& x,
+            const T& y)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::replace(::std::execution::par, f, l, x, y);
+        }
         // END REPLACE
 
         // BEGIN REPLACE_COPY
@@ -1353,7 +2694,7 @@
             typename I,
             typename O,
             typename T,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         void replace_copy(
             execution::parallel_unsequenced_policy,
@@ -1365,6 +2706,27 @@
         {
             return ::thrust::replace_copy(::thrust::device, fi, li, fo, x, y);
         }
+
+        template<
+            typename I,
+            typename O,
+            typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        void replace_copy(
+            execution::parallel_unsequenced_policy,
+            I fi,
+            I li,
+            O fo,
+            const T& x,
+            const T& y)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::replace_copy(::std::execution::par, fi, li, fo, x, y);
+        }
         // END REPLACE_COPY
 
         // BEGIN REPLACE_COPY_IF
@@ -1374,7 +2736,9 @@
             typename O,
             typename P,
             typename T,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         void replace_copy_if(
             execution::parallel_unsequenced_policy,
@@ -1387,6 +2751,36 @@
             return ::thrust::replace_copy_if(
                 ::thrust::device, fi, li, fo, ::std::move(p), x);
         }
+
+        template<
+            typename I,
+            typename O,
+            typename P,
+            typename T,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        void replace_copy_if(
+            execution::parallel_unsequenced_policy,
+            I fi,
+            I li,
+            O fo,
+            P p,
+            const T& x)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::replace_copy_if(
+                ::std::execution::par, fi, li, fo, ::std::move(p), x);
+        }
         // END REPLACE_COPY_IF
 
         // BEGIN REPLACE_IF
@@ -1395,7 +2789,9 @@
             typename I,
             typename P,
             typename T,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         void replace_if(
             execution::parallel_unsequenced_policy, I f, I l, P p, const T& x)
@@ -1403,17 +2799,52 @@
             return
                 ::thrust::replace_if(::thrust::device, f, l, ::std::move(p), x);
         }
+
+        template<
+            typename I,
+            typename P,
+            typename T,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        void replace_if(
+            execution::parallel_unsequenced_policy, I f, I l, P p, const T& x)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::replace_if(
+                ::std::execution::par, f, l, ::std::move(p), x);
+        }
         // END REPLACE_IF
 
         // BEGIN REVERSE
         // https://en.cppreference.com/w/cpp/algorithm/reverse
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void reverse(execution::parallel_unsequenced_policy, I f, I l)
         {
             return ::thrust::reverse(::thrust::device, f, l);
+        }
+
+        template<
+            typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void reverse(execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::reverse(::std::execution::par, f, l);
         }
         // END REVERSE
 
@@ -1422,14 +2853,29 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         void reverse_copy(
             execution::parallel_unsequenced_policy, I fi, I li, O fo)
         {
             return ::thrust::reverse_copy(::thrust::device, fi, li, fo);
         }
-        // END REVERSE
+
+        template<
+            typename I,
+            typename O,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        void reverse_copy(
+            execution::parallel_unsequenced_policy, I fi, I li, O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::reverse_copy(::std::execution::par, fi, li, fo);
+        }
+        // END REVERSE_COPY
 
         // BEGIN ROTATE
         // https://en.cppreference.com/w/cpp/algorithm/rotate
@@ -1448,7 +2894,7 @@
             typename I1,
             typename O,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
         inline
         O set_difference(
             execution::parallel_unsequenced_policy,
@@ -1466,9 +2912,34 @@
             typename I0,
             typename I1,
             typename O,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
+        inline
+        O set_difference(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::set_difference(
+                ::std::execution::par, fi0, li0, fi1, li1, fo);
+        }
+
+        template<
+            typename I0,
+            typename I1,
+            typename O,
             typename R,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1, O>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         O set_difference(
             execution::parallel_unsequenced_policy,
@@ -1481,6 +2952,38 @@
         {
             return ::thrust::set_difference(
                 ::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
+        }
+
+        template<
+            typename I0,
+            typename I1,
+            typename O,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1, O>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        O set_difference(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo,
+            R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::set_difference(
+                ::std::execution::par, fi0, li0, fi1, li1, fo, ::std::move(r));
         }
         // END SET_DIFFERENCE
 
@@ -1491,7 +2994,7 @@
             typename I1,
             typename O,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
         inline
         O set_intersection(
             execution::parallel_unsequenced_policy,
@@ -1509,9 +3012,34 @@
             typename I0,
             typename I1,
             typename O,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
+        inline
+        O set_intersection(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::set_intersection(
+                ::std::execution::par, fi0, li0, fi1, li1, fo);
+        }
+
+        template<
+            typename I0,
+            typename I1,
+            typename O,
             typename R,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1, O>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         O set_intersection(
             execution::parallel_unsequenced_policy,
@@ -1524,6 +3052,38 @@
         {
             return ::thrust::set_intersection(
                 ::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
+        }
+
+        template<
+            typename I0,
+            typename I1,
+            typename O,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1, O>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        O set_intersection(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo,
+            R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::set_intersection(
+                ::std::execution::par, fi0, li0, fi1, li1, fo, ::std::move(r));
         }
         // END SET_INTERSECTION
 
@@ -1534,7 +3094,7 @@
             typename I1,
             typename O,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
         inline
         O set_symmetric_difference(
             execution::parallel_unsequenced_policy,
@@ -1552,9 +3112,34 @@
             typename I0,
             typename I1,
             typename O,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
+        inline
+        O set_symmetric_difference(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::set_symmetric_difference(
+                ::std::execution::par, fi0, li0, fi1, li1, fo);
+        }
+
+        template<
+            typename I0,
+            typename I1,
+            typename O,
             typename R,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1, O>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         O set_symmetric_difference(
             execution::parallel_unsequenced_policy,
@@ -1568,6 +3153,38 @@
             return ::thrust::set_symmetric_difference(
                 ::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
         }
+
+        template<
+            typename I0,
+            typename I1,
+            typename O,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1, O>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        O set_symmetric_difference(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo,
+            R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::set_symmetric_difference(
+                ::std::execution::par, fi0, li0, fi1, li1, fo, ::std::move(r));
+        }
         // END SET_SYMMETRIC_DIFFERENCE
 
         // BEGIN SET_UNION
@@ -1577,7 +3194,7 @@
             typename I1,
             typename O,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1, O>>* = nullptr>
         inline
         O set_union(
             execution::parallel_unsequenced_policy,
@@ -1595,9 +3212,34 @@
             typename I0,
             typename I1,
             typename O,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1, O>>* = nullptr>
+        inline
+        O set_union(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return
+                ::std::set_union(::std::execution::par, fi0, li0, fi1, li1, fo);
+        }
+
+        template<
+            typename I0,
+            typename I1,
+            typename O,
             typename R,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1, O>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         O set_union(
             execution::parallel_unsequenced_policy,
@@ -1611,13 +3253,45 @@
             return ::thrust::set_union(
                 ::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
         }
+
+        template<
+            typename I0,
+            typename I1,
+            typename O,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1, O>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        O set_union(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            I1 li1,
+            O fo,
+            R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::set_union(
+                ::std::execution::par, fi0, li0, fi1, li1, fo, ::std::move(r));
+        }
         // END SET_UNION
 
         // BEGIN SORT
         // https://en.cppreference.com/w/cpp/algorithm/sort
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void sort(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -1626,12 +3300,46 @@
 
         template<
             typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void sort(execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::sort(::std::execution::par, f, l);
+        }
+
+        template<
+            typename I,
             typename R,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         void sort(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
             return ::thrust::sort(::thrust::device, f, l, ::std::move(r));
+        }
+
+        template<
+            typename I,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        void sort(execution::parallel_unsequenced_policy, I f, I l, R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::sort(::std::execution::par, f, l, ::std::move(r));
         }
         // END SORT
 
@@ -1640,7 +3348,9 @@
         template<
             typename I,
             typename P,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<P>()>* = nullptr>
         inline
         I stable_partition(
             execution::parallel_unsequenced_policy, I f, I l, P p)
@@ -1648,13 +3358,35 @@
             return ::thrust::stable_partition(
                 ::thrust::device, f, l, ::std::move(p));
         }
+
+        template<
+            typename I,
+            typename P,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<P>()>* = nullptr>
+        inline
+        I stable_partition(
+            execution::parallel_unsequenced_policy, I f, I l, P p)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<P>()) {
+                ::hipstd::unsupported_callable_type<P>();
+            }
+
+            return ::std::stable_partition(
+                ::std::execution::par, f, l, ::std::move(p));
+        }
         // END STABLE_PARTITION
 
         // BEGIN STABLE_SORT
         // https://en.cppreference.com/w/cpp/algorithm/stable_sort
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void stable_sort(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -1663,13 +3395,48 @@
 
         template<
             typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void stable_sort(execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::stable_sort(::std::execution::par, f, l);
+        }
+
+        template<
+            typename I,
             typename R,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         void stable_sort(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
             return
                 ::thrust::stable_sort(::thrust::device, f, l, ::std::move(r));
+        }
+
+        template<
+            typename I,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        void stable_sort(execution::parallel_unsequenced_policy, I f, I l, R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return
+                ::std::stable_sort(::std::execution::par, f, l, ::std::move(r));
         }
         // END STABLE_SORT
 
@@ -1678,13 +3445,28 @@
         template<
             typename I0,
             typename I1,
-            enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
         inline
         I1 swap_ranges(
             execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
         {
             return ::thrust::swap_ranges(::thrust::device, f0, l0, f1);
+        }
+
+        template<
+            typename I0,
+            typename I1,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
+        inline
+        I1 swap_ranges(
+            execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I0>::iterator_category>();
+
+            return ::std::swap_ranges(::std::execution::par, f0, l0, f1);
         }
         // END SWAP_RANGES
 
@@ -1694,7 +3476,9 @@
             typename I,
             typename O,
             typename F,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<F>()>* = nullptr>
         inline
         O transform(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, F fn)
@@ -1704,12 +3488,37 @@
         }
 
         template<
+            typename I,
+            typename O,
+            typename F,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<F>()>* = nullptr>
+        inline
+        O transform(
+            execution::parallel_unsequenced_policy, I fi, I li, O fo, F fn)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<F>()) {
+                ::hipstd::unsupported_callable_type<F>();
+            }
+
+            return ::std::transform(
+                ::std::execution::par, fi, li, fo, ::std::move(fn));
+        }
+
+        template<
             typename I0,
             typename I1,
             typename O,
             typename F,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1, O>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1, O>() &&
+                ::hipstd::is_offloadable_callable<F>()>* = nullptr>
         inline
         O transform(
             execution::parallel_unsequenced_policy,
@@ -1722,6 +3531,37 @@
             return ::thrust::transform(
                 ::thrust::device, fi0, li0, fi1, fo, ::std::move(fn));
         }
+
+        template<
+            typename I0,
+            typename I1,
+            typename O,
+            typename F,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1, O>() ||
+                !::hipstd::is_offloadable_callable<F>()>* = nullptr>
+        inline
+        O transform(
+            execution::parallel_unsequenced_policy,
+            I0 fi0,
+            I0 li0,
+            I1 fi1,
+            O fo,
+            F fn)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<F>()) {
+                ::hipstd::unsupported_callable_type<F>();
+            }
+
+            return ::std::transform(
+                ::std::execution::par, fi0, li0, fi1, fo, ::std::move(fn));
+        }
         // END TRANSFORM
 
         // BEGIN TRANSFORM_EXCLUSIVE_SCAN
@@ -1732,7 +3572,9 @@
             typename T,
             typename Op0,
             typename Op1,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
         inline
         O transform_exclusive_scan(
             execution::parallel_unsequenced_policy,
@@ -1752,6 +3594,44 @@
                 ::std::move(x),
                 ::std::move(op0));
         }
+
+        template<
+            typename I,
+            typename O,
+            typename T,
+            typename Op0,
+            typename Op1,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+        inline
+        O transform_exclusive_scan(
+            execution::parallel_unsequenced_policy,
+            I fi,
+            I li,
+            O fo,
+            T x,
+            Op0 op0,
+            Op1 op1)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<Op0, Op1>()) {
+                ::hipstd::unsupported_callable_type<Op0, Op1>();
+            }
+
+            return ::std::transform_exclusive_scan(
+                ::std::execution::par,
+                fi,
+                li,
+                fo,
+                ::std::move(x),
+                ::std::move(op0),
+                ::std::move(op1));
+        }
         // END TRANSFORM_EXCLUSIVE_SCAN
 
         // BEGIN TRANSFORM_INCLUSIVE_SCAN
@@ -1761,7 +3641,9 @@
             typename O,
             typename Op0,
             typename Op1,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
         inline
         O transform_inclusive_scan(
             execution::parallel_unsequenced_policy,
@@ -1785,8 +3667,45 @@
             typename O,
             typename Op0,
             typename Op1,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+        inline
+        O transform_inclusive_scan(
+            execution::parallel_unsequenced_policy,
+            I fi,
+            I li,
+            O fo,
+            Op0 op0,
+            Op1 op1)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<Op0, Op1>()) {
+                ::hipstd::unsupported_callable_type<Op0, Op1>();
+            }
+
+            return ::std::transform_inclusive_scan(
+                ::std::execution::par,
+                fi,
+                li,
+                fo,
+                ::std::move(op0),
+                ::std::move(op1));
+        }
+
+        template<
+            typename I,
+            typename O,
+            typename Op0,
+            typename Op1,
             typename T,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
         inline
         O transform_inclusive_scan(
             execution::parallel_unsequenced_policy,
@@ -1816,6 +3735,44 @@
                 return op0(x, y);
             });
         }
+
+        template<
+            typename I,
+            typename O,
+            typename Op0,
+            typename Op1,
+            typename T,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+        inline
+        O transform_inclusive_scan(
+            execution::parallel_unsequenced_policy,
+            I fi,
+            I li,
+            O fo,
+            Op0 op0,
+            Op1 op1,
+            T x)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<Op0, Op1>()) {
+                ::hipstd::unsupported_callable_type<Op0, Op1>();
+            }
+
+            return ::std::transform_inclusive_scan(
+                ::std::execution::par,
+                fi,
+                li,
+                fo,
+                ::std::move(op0),
+                ::std::move(op1),
+                ::std::move(x));
+        }
         // END TRANSFORM_INCLUSIVE_SCAN
 
         // BEGIN TRANSFORM_REDUCE
@@ -1824,8 +3781,7 @@
             typename I0,
             typename I1,
             typename T,
-            enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
         inline
         T transform_reduce(
             execution::parallel_unsequenced_policy,
@@ -1842,10 +3798,33 @@
             typename I0,
             typename I1,
             typename T,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
+        inline
+        T transform_reduce(
+            execution::parallel_unsequenced_policy,
+            I0 f0,
+            I0 l0,
+            I1 f1,
+            T x)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I0>::iterator_category,
+                typename iterator_traits<I1>::iterator_category>();
+
+            return ::std::transform_reduce(
+                ::std::execution::par, f0, l0, f1, ::std::move(x));
+        }
+
+        template<
+            typename I0,
+            typename I1,
+            typename T,
             typename Op0,
             typename Op1,
             enable_if_t<
-                ::hipstd::AreRandomAccessIterators_v<I0, I1>>* = nullptr>
+                ::hipstd::is_offloadable_iterator<I0, I1>() &&
+                ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
         inline
         T transform_reduce(
             execution::parallel_unsequenced_policy,
@@ -1867,11 +3846,51 @@
         }
 
         template<
+            typename I0,
+            typename I1,
+            typename T,
+            typename Op0,
+            typename Op1,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I0, I1>() ||
+                !::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+        inline
+        T transform_reduce(
+            execution::parallel_unsequenced_policy,
+            I0 f0,
+            I0 l0,
+            I1 f1,
+            T x,
+            Op0 op0,
+            Op1 op1)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I0, I1>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I0>::iterator_category,
+                    typename iterator_traits<I1>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<Op0, Op1>()) {
+                ::hipstd::unsupported_callable_type<Op0, Op1>();
+            }
+
+            return ::std::transform_reduce(
+                ::std::execution::par,
+                f0,
+                l0,
+                f1,
+                ::std::move(x),
+                ::std::move(op0),
+                ::std::move(op1));
+        }
+
+        template<
             typename I,
             typename T,
             typename Op0,
             typename Op1,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
         inline
         T transform_reduce(
             execution::parallel_unsequenced_policy,
@@ -1889,6 +3908,40 @@
                 ::std::move(x),
                 ::std::move(op0));
         }
+
+        template<
+            typename I,
+            typename T,
+            typename Op0,
+            typename Op1,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+        inline
+        T transform_reduce(
+            execution::parallel_unsequenced_policy,
+            I f,
+            I l,
+            T x,
+            Op0 op0,
+            Op1 op1)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<Op0, Op1>()) {
+                ::hipstd::unsupported_callable_type<Op0, Op1>();
+            }
+
+            return ::std::transform_reduce(
+                ::std::execution::par,
+                f,
+                l,
+                ::std::move(x),
+                ::std::move(op0),
+                ::std::move(op1));
+        }
         // END TRANSFORM_REDUCE
 
         // BEGIN UNINITIALIZED_COPY
@@ -1896,12 +3949,27 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         O uninitialized_copy(
             execution::parallel_unsequenced_policy, I fi, I li, O fo)
         {
             return ::thrust::uninitialized_copy(::thrust::device, fi, li, fo);
+        }
+
+        template<
+            typename I,
+            typename O,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O uninitialized_copy(
+            execution::parallel_unsequenced_policy, I fi, I li, O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::uninitialized_copy(::std::execution::par, fi, li, fo);
         }
         // END UNINITIALIZED_COPY
 
@@ -1911,12 +3979,29 @@
             typename I,
             typename N,
             typename O,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
-        O uninitialized_copy(
+        O uninitialized_copy_n(
             execution::parallel_unsequenced_policy, I fi, N n, O fo)
         {
             return ::thrust::uninitialized_copy_n(::thrust::device, fi, n, fo);
+        }
+
+        template<
+            typename I,
+            typename N,
+            typename O,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O uninitialized_copy_n(
+            execution::parallel_unsequenced_policy, I fi, N n, O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return
+                ::std::uninitialized_copy_n(::std::execution::par, fi, n, fo);
         }
         // END UNINITIALIZED_COPY_N
 
@@ -1924,7 +4009,7 @@
         // https://en.cppreference.com/w/cpp/memory/uninitialized_default_construct
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void uninitialized_default_construct(
             execution::parallel_unsequenced_policy, I f, I l)
@@ -1935,6 +4020,20 @@
                 ::new (p) typename iterator_traits<I>::value_type;
             });
         }
+
+        template<
+            typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void uninitialized_default_construct(
+            execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::uninitialized_default_construct(
+                ::std::execution::par, f, l);
+        }
         // END UNINITIALIZED_DEFAULT_CONSTRUCT
 
         // BEGIN UNINITIALIZED_DEFAULT_CONSTRUCT_N
@@ -1942,9 +4041,9 @@
         template<
             typename I,
             typename N,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
-        void uninitialized_default_construct_N(
+        void uninitialized_default_construct_n(
             execution::parallel_unsequenced_policy, I f, N n)
         {
             return ::thrust::for_each_n(::thrust::device, f, n, [](auto& x) {
@@ -1953,6 +4052,21 @@
                 ::new (p) typename iterator_traits<I>::value_type;
             });
         }
+
+        template<
+            typename I,
+            typename N,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void uninitialized_default_construct_n(
+            execution::parallel_unsequenced_policy, I f, N n)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::uninitialized_default_construct_n(
+                ::std::execution::par, f, n);
+        }
         // END UNINITIALIZED_DEFAULT_CONSTRUCT_N
 
         // BEGIN UNINITIALIZED_FILL
@@ -1960,12 +4074,26 @@
         template<
             typename I,
             typename T,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void uninitialized_fill(
             execution::parallel_unsequenced_policy, I f, I l, const T& x)
         {
             return ::thrust::uninitialized_fill(::thrust::device, f, l, x);
+        }
+
+        template<
+            typename I,
+            typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void uninitialized_fill(
+            execution::parallel_unsequenced_policy, I f, I l, const T& x)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::offload_category>();
+
+            return ::std::uninitialized_fill(::std::execution::par, f, l, x);
         }
         // END UNINITIALIZED_FILL
 
@@ -1975,12 +4103,27 @@
             typename I,
             typename N,
             typename T,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void uninitialized_fill(
             execution::parallel_unsequenced_policy, I f, N n, const T& x)
         {
             return ::thrust::uninitialized_fill_n(::thrust::device, f, n, x);
+        }
+
+        template<
+            typename I,
+            typename N,
+            typename T,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void uninitialized_fill(
+            execution::parallel_unsequenced_policy, I f, N n, const T& x)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::uninitialized_fill_n(::std::execution::par, f, n, x);
         }
         // END UNINITIALIZED_FILL_N
 
@@ -1989,7 +4132,7 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         O uninitialized_move(
             execution::parallel_unsequenced_policy, I fi, I li, O fo)
@@ -2000,6 +4143,21 @@
                 make_move_iterator(li),
                 fo);
         }
+
+        template<
+            typename I,
+            typename O,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O uninitialized_move(
+            execution::parallel_unsequenced_policy, I fi, I li, O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::uninitialized_move(::std::execution::par, fi, li, fo);
+        }
         // END UNINITIALIZED_MOVE
 
         // BEGIN UNINITIALIZED_MOVE_N
@@ -2008,7 +4166,7 @@
             typename I,
             typename N,
             typename O,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         O uninitialized_move_n(
             execution::parallel_unsequenced_policy, I fi, N n, O fo)
@@ -2016,13 +4174,30 @@
             return ::thrust::uninitialized_copy_n(
                 ::thrust::device, make_move_iterator(fi), n, fo);
         }
+
+        template<
+            typename I,
+            typename N,
+            typename O,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O uninitialized_move_n(
+            execution::parallel_unsequenced_policy, I fi, N n, O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return
+                ::std::uninitialized_move_n(::std::execution::par, fi, n, fo);
+        }
         // END UNINITIALIZED_MOVE_N
 
         // BEGIN UNINITIALIZED_VALUE_CONSTRUCT
         // https://en.cppreference.com/w/cpp/memory/uninitialized_value_construct
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void uninitialized_value_construct(
             execution::parallel_unsequenced_policy, I f, I l)
@@ -2033,6 +4208,20 @@
                 ::new (p) typename iterator_traits<I>::value_type{};
             });
         }
+
+        template<
+            typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void uninitialized_value_construct(
+            execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::uninitialized_value_construct(
+                ::std::execution::par, f, l);
+        }
         // END UNINITIALIZED_VALUE_CONSTRUCT
 
         // BEGIN UNINITIALIZED_VALUE_CONSTRUCT_N
@@ -2040,7 +4229,7 @@
         template<
             typename I,
             typename N,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         void uninitialized_value_construct_n(
             execution::parallel_unsequenced_policy, I f, N n)
@@ -2051,13 +4240,28 @@
                 ::new (p) typename iterator_traits<I>::value_type{};
             });
         }
+
+        template<
+            typename I,
+            typename N,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        void uninitialized_value_construct_n(
+            execution::parallel_unsequenced_policy, I f, N n)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::uninitialized_value_construct_n(
+                ::std::execution::par, f, n);
+        }
         // END UNINITIALIZED_VALUE_CONSTRUCT_N
 
         // BEGIN UNIQUE
         // https://en.cppreference.com/w/cpp/algorithm/unique
         template<
             typename I,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
         inline
         I unique(execution::parallel_unsequenced_policy, I f, I l)
         {
@@ -2066,12 +4270,46 @@
 
         template<
             typename I,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+        inline
+        I unique(execution::parallel_unsequenced_policy, I f, I l)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category>();
+
+            return ::std::unique(::std::execution::par, f, l);
+        }
+
+        template<
+            typename I,
             typename R,
-            enable_if_t<::hipstd::IsRandomAccessIterator_v<I>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         I unique(execution::parallel_unsequenced_policy, I f, I l, R r)
         {
             return ::thrust::unique(::thrust::device, f, l, ::std::move(r));
+        }
+
+        template<
+            typename I,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        I unique(execution::parallel_unsequenced_policy, I f, I l, R r)
+        {
+            if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::unique(::std::execution::par, f, l, ::std::move(r));
         }
         // END UNIQUE
 
@@ -2080,7 +4318,7 @@
         template<
             typename I,
             typename O,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
         inline
         O unique_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
         {
@@ -2090,14 +4328,55 @@
         template<
             typename I,
             typename O,
+            enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+        inline
+        O unique_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
+        {
+            ::hipstd::unsupported_iterator_category<
+                typename iterator_traits<I>::iterator_category,
+                typename iterator_traits<O>::iterator_category>();
+
+            return ::std::unique_copy(::std::execution::par, fi, li, fo);
+        }
+
+        template<
+            typename I,
+            typename O,
             typename R,
-            enable_if_t<::hipstd::AreRandomAccessIterators_v<I, O>>* = nullptr>
+            enable_if_t<
+                ::hipstd::is_offloadable_iterator<I, O>() &&
+                ::hipstd::is_offloadable_callable<R>()>* = nullptr>
         inline
         O unique_copy(
             execution::parallel_unsequenced_policy, I fi, I li, O fo, R r)
         {
             return ::thrust::unique_copy(
                 ::thrust::device, fi, li, fo, ::std::move(r));
+        }
+
+        template<
+            typename I,
+            typename O,
+            typename R,
+            enable_if_t<
+                !::hipstd::is_offloadable_iterator<I, O>() ||
+                !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+        inline
+        O unique_copy(
+            execution::parallel_unsequenced_policy, I fi, I li, O fo, R r)
+        {
+
+            if constexpr (!::hipstd::is_offloadable_iterator<I, O>()) {
+                ::hipstd::unsupported_iterator_category<
+                    typename iterator_traits<I>::iterator_category,
+                    typename iterator_traits<O>::iterator_category>();
+            }
+            if constexpr (!::hipstd::is_offloadable_callable<R>()) {
+                ::hipstd::unsupported_callable_type<R>();
+            }
+
+            return ::std::unique_copy(
+                ::std::execution::par, fi, li, fo, ::std::move(r));
         }
         // END UNIQUE_COPY
     }
