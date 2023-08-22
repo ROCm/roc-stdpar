@@ -22,8 +22,8 @@
 
 #pragma once
 
-#if defined(__STDPAR__)
-    #warning Using STDPAR Acceleration (temporary debug message)
+#if defined(__HIPSTDPAR__)
+    #warning Using HIPSTDPAR Acceleration (temporary debug message)
 
     #include <thrust/adjacent_difference.h>
     #include <thrust/copy.h>
@@ -61,7 +61,7 @@
     #include <iterator>
     #include <type_traits>
 
-    #if defined(__STDPAR_INTERPOSE_ALLOC__)
+    #if defined(__HIPSTDPAR_INTERPOSE_ALLOC__)
         #include <hip/hip_runtime.h>
 
         #include <cstddef>
@@ -113,7 +113,7 @@
         extern "C"
         inline
         __attribute__((used))
-        void* __stdpar_aligned_alloc(std::size_t a, std::size_t n)
+        void* __hipstdpar_aligned_alloc(std::size_t a, std::size_t n)
         {   // TODO: tidy up, revert to using std.
             auto m = n + sizeof(hipstd::Header) + a - 1;
 
@@ -131,48 +131,49 @@
         extern "C"
         inline
         __attribute__((used))
-        void* __stdpar_malloc(std::size_t n)
+        void* __hipstdpar_malloc(std::size_t n)
         {
             constexpr auto a = alignof(std::max_align_t);
 
-            return __stdpar_aligned_alloc(a, n);
+            return __hipstdpar_aligned_alloc(a, n);
         }
 
         extern "C"
         inline
         __attribute__((used))
-        void* __stdpar_calloc(std::size_t n, std::size_t sz)
+        void* __hipstdpar_calloc(std::size_t n, std::size_t sz)
         {
-            return std::memset(__stdpar_malloc(n * sz), 0, n * sz);
+            return std::memset(__hipstdpar_malloc(n * sz), 0, n * sz);
         }
 
         extern "C"
         inline
         __attribute__((used))
-        int __stdpar_posix_aligned_alloc(void** p, std::size_t a, std::size_t n)
+        int __hipstdpar_posix_aligned_alloc(
+            void** p, std::size_t a, std::size_t n)
         {   // TODO: check invariants on alignment
             if (!p || n == 0) return 0;
 
-            *p = __stdpar_aligned_alloc(a, n);
+            *p = __hipstdpar_aligned_alloc(a, n);
 
             return 1;
         }
 
-        extern "C" __attribute__((weak)) void __stdpar_hidden_free(void*);
+        extern "C" __attribute__((weak)) void __hipstdpar_hidden_free(void*);
 
         extern "C"
         inline
         __attribute__((used))
-        void* __stdpar_realloc(void* p, std::size_t n)
+        void* __hipstdpar_realloc(void* p, std::size_t n)
         {
-            auto q = std::memcpy(__stdpar_malloc(n), p, n);
+            auto q = std::memcpy(__hipstdpar_malloc(n), p, n);
 
             auto h = static_cast<hipstd::Header*>(p) - 1;
 
             hipPointerAttribute_t tmp{};
             auto r = hipPointerGetAttributes(&tmp, h);
 
-            if (!tmp.isManaged) __stdpar_hidden_free(p);
+            if (!tmp.isManaged) __hipstdpar_hidden_free(p);
             else hipstd::heap.deallocate(h->alloc_ptr, h->size, h->align);
 
             return q;
@@ -181,22 +182,22 @@
         extern "C"
         inline
         __attribute__((used))
-        void* __stdpar_realloc_array(void* p, std::size_t n, std::size_t sz)
+        void* __hipstdpar_realloc_array(void* p, std::size_t n, std::size_t sz)
         {   // TODO: handle overflow in n * sz gracefully, as per spec.
-            return __stdpar_realloc(p, n * sz);
+            return __hipstdpar_realloc(p, n * sz);
         }
 
         extern "C"
         inline
         __attribute__((used))
-        void __stdpar_free(void* p)
+        void __hipstdpar_free(void* p)
         {
             auto h = static_cast<hipstd::Header*>(p) - 1;
 
             hipPointerAttribute_t tmp{};
             auto r = hipPointerGetAttributes(&tmp, h);
 
-            if (!tmp.isManaged) return __stdpar_hidden_free(p);
+            if (!tmp.isManaged) return __hipstdpar_hidden_free(p);
 
             return hipstd::heap.deallocate(h->alloc_ptr, h->size, h->align);
         }
@@ -204,29 +205,30 @@
         extern "C"
         inline
         __attribute__((used))
-        void* __stdpar_operator_new_aligned(std::size_t n, std::size_t a)
+        void* __hipstdpar_operator_new_aligned(std::size_t n, std::size_t a)
         {
-            if (auto p = __stdpar_aligned_alloc(a, n)) return p;
+            if (auto p = __hipstdpar_aligned_alloc(a, n)) return p;
 
-            throw std::runtime_error{"Failed __stdpar_operator_new_aligned"};
+            throw std::runtime_error{"Failed __hipstdpar_operator_new_aligned"};
         }
 
         extern "C"
         inline
         __attribute__((used))
-        void* __stdpar_operator_new(std::size_t n)
+        void* __hipstdpar_operator_new(std::size_t n)
         {   // TODO: consider adding the special handling for operator new
-            return __stdpar_operator_new_aligned(n, alignof(std::max_align_t));
+            return
+                __hipstdpar_operator_new_aligned(n, alignof(std::max_align_t));
         }
 
         extern "C"
         inline
         __attribute__((used))
-        void* __stdpar_operator_new_nothrow(
+        void* __hipstdpar_operator_new_nothrow(
             std::size_t n, std::nothrow_t) noexcept
         {
             try {
-                return __stdpar_operator_new(n);
+                return __hipstdpar_operator_new(n);
             }
             catch (...) {
                 // TODO: handle the potential exception
@@ -236,11 +238,11 @@
         extern "C"
         inline
         __attribute__((used))
-        void* __stdpar_operator_new_aligned_nothrow(
+        void* __hipstdpar_operator_new_aligned_nothrow(
             std::size_t n, std::size_t a, std::nothrow_t) noexcept
         {   // TODO: consider adding the special handling for operator new
             try {
-                return __stdpar_operator_new_aligned(n, a);
+                return __hipstdpar_operator_new_aligned(n, a);
             }
             catch (...) {
                 // TODO: handle the potential exception.
@@ -250,13 +252,13 @@
         extern "C"
         inline
         __attribute__((used))
-        void __stdpar_operator_delete_aligned_sized(
+        void __hipstdpar_operator_delete_aligned_sized(
             void* p, std::size_t n, std::size_t a) noexcept
         {
             hipPointerAttribute_t tmp{};
             auto r = hipPointerGetAttributes(&tmp, p);
 
-            if (!tmp.isManaged) return __stdpar_hidden_free(p);
+            if (!tmp.isManaged) return __hipstdpar_hidden_free(p);
 
             return hipstd::heap.deallocate(p, n, a);
         }
@@ -264,25 +266,25 @@
         extern "C"
         inline
         __attribute__((used))
-        void __stdpar_operator_delete(void* p) noexcept
+        void __hipstdpar_operator_delete(void* p) noexcept
         {
-            return __stdpar_free(p);
+            return __hipstdpar_free(p);
         }
 
         extern "C"
         inline
         __attribute__((used))
-        void __stdpar_operator_delete_aligned(void* p, std::size_t) noexcept
+        void __hipstdpar_operator_delete_aligned(void* p, std::size_t) noexcept
         {   // TODO: use alignment
-            return __stdpar_free(p);
+            return __hipstdpar_free(p);
         }
 
         extern "C"
         inline
         __attribute__((used))
-        void __stdpar_operator_delete_sized(void* p, std::size_t n) noexcept
+        void __hipstdpar_operator_delete_sized(void* p, std::size_t n) noexcept
         {
-            return __stdpar_operator_delete_aligned_sized(
+            return __hipstdpar_operator_delete_aligned_sized(
                 p, n, alignof(std::max_align_t));
         }
     #endif
