@@ -117,6 +117,23 @@ directly.
 | bm1    | 67               | 2108             | 31                       |
 | bm2    | 62               | 1906             | 30                       |
 
+## miniWeather
+
+- [repo](https://github.com/jefflarkin/miniWeather)
+- [patch](../../data/patches/miniWeather/MINIWEATHER.patch)
+
+| Test            | A - CPU (s) | B - GPU (s) | A / B (higher is better) |
+|:---------------:|:-----------:|:-----------:|:------------------------:|
+| THERMAL         | 13          | 4           | 3                        |
+| COLLISION       | 9           | 3           | 3                        |
+| MOUNTAIN        | 20          | 6           | 3                        |
+| DENSITY_CURRENT | 8           | 2           | 4                        |
+| INJECTION       | 16          | 5           | 3                        |
+
+- notes:
+  - run parameterised with `NX == 400`, `NZ == 200`, `OUT_FREQ == 10` and
+    `SIM_TIME` as specified in the documentation
+
 ## `nbody-stdpar`
 
 - [repo](https://github.com/jbeisman/nbody-stdpar)
@@ -140,11 +157,11 @@ directly.
 - [patch](../../data/patches/p2r-tests/P2R_TESTS.patch)
 
 | Test       | A - CPU (s) | B - GPU (s) | A / B (higher is better) |
-|:----------:|:------------:|:------------:|:------------------------:|
-| 8192 trks  | 3            | 3            | 1                        |
-| 16384 trks | 6            | 6            | 1                        |
-| 32768 trks | 14           | 12           | 1.16                     |
-| 65536 trks | 23           | 23           | 1                        |
+|:----------:|:-----------:|:-----------:|:------------------------:|
+| 8192 trks  | 3           | 3           | 1                        |
+| 16384 trks | 6           | 6           | 1                        |
+| 32768 trks | 14          | 12          | 1.16                     |
+| 65536 trks | 23          | 23          | 1                        |
 
 - notes:
   - table records total time i.e. `setup time` + `tot time`

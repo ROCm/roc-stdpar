@@ -1,0 +1,216 @@
+diff --git a/cpp/CMakeLists.txt b/cpp/CMakeLists.txt
+index 7deaaf8..65985ab 100644
+--- a/cpp/CMakeLists.txt
++++ b/cpp/CMakeLists.txt
+@@ -130,6 +130,16 @@ if (("${CMAKE_CXX_COMPILER_ID}" STREQUAL "PGI" OR ${CMAKE_CXX_COMPILER_ID} STREQ
+   MESSAGE(STATUS "    Detected NVIDIA compiler, adding \"-stdpar=gpu\" to CXX flags. Set STDPAR_FLAGS to override.")
+ endif()
+ set(_COMPILER_FLAGS "${EXE_DEFS} -I${PNETCDF_PATH}/include ${STDPAR_FLAGS}")
++if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
++  if (${STDPAR_FLAGS} STREQUAL "")
++    set(STDPAR_FLAGS " --hipstdpar")
++    MESSAGE(STATUS "    Detected HIP Clang compiler, adding \"--hipstdpar\" to CXX flags. Set STDPAR_FLAGS to override.")
++  endif()
++  string(APPEND _COMPILER_FLAGS " --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET}")
++  if (NOT ${STDPAR_TARGET} MATCHES "^gfx9")
++    string(APPEND _COMPILER_FLAGS " --hipstdpar-interpose-alloc")
++  endif()
++endif()
+ string(STRIP "${_COMPILER_FLAGS}" _COMPILER_FLAGS)
+ set_target_properties(mpistdpar PROPERTIES COMPILE_FLAGS "${_COMPILER_FLAGS}")
+ set(_LINK_FLAGS "-L${PNETCDF_PATH}/lib -lpnetcdf ${STDPAR_FLAGS}")
+@@ -141,6 +151,15 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "PGI" AND "${STDPAR_FLAGS}" STREQUAL "")
+   set(STDPAR_FLAGS "-stdpar=gpu")
+ endif()
+ set(_COMPILER_FLAGS "${TEST_DEFS} -I${PNETCDF_PATH}/include ${STDPAR_FLAGS}")
++if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
++  if (${STDPAR_FLAGS} STREQUAL "")
++    set(STDPAR_FLAGS " --hipstdpar")
++  endif()
++  string(APPEND _COMPILER_FLAGS " --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET}")
++  if (NOT ${STDPAR_TARGET} MATCHES "^gfx9")
++    string(APPEND _COMPILER_FLAGS " --hipstdpar-interpose-alloc")
++  endif()
++endif()
+ string(STRIP "${_COMPILER_FLAGS}" _COMPILER_FLAGS)
+ set_target_properties(mpistdpar_test PROPERTIES COMPILE_FLAGS "${_COMPILER_FLAGS}")
+ 
+diff --git a/cpp/miniWeather_mpi_stdpar.cpp b/cpp/miniWeather_mpi_stdpar.cpp
+index 980019a..2eab6b6 100644
+--- a/cpp/miniWeather_mpi_stdpar.cpp
++++ b/cpp/miniWeather_mpi_stdpar.cpp
+@@ -238,7 +238,7 @@ void semi_discrete_step( double *state_init , double *state_forcing , double *st
+   double _dt = dt;
+   //Apply the tendencies to the fluid state
+   thrust::counting_iterator<int> begin(0),end(NUM_VARS*nz*nx);
+-  std::for_each(std::execution::par,begin,end,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin,end,[=](int idx)
+       {
+         int ll= idx / (_nx*_nz);
+         int k = (idx/_nx) % _nz;
+@@ -263,7 +263,7 @@ void compute_tendencies_x( double *state , double *flux , double *tend ,
+   double _dx = dx;
+   //Compute fluxes in the x-direction for each cell
+   thrust::counting_iterator<int> begin1(0),end1((nx+1)*nz);
+-  std::for_each(std::execution::par,begin1,end1,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin1,end1,[=](int idx)
+       {
+         int i = idx%(_nx+1);
+         int k = idx/(_nx+1);
+@@ -296,7 +296,7 @@ void compute_tendencies_x( double *state , double *flux , double *tend ,
+ 
+   //Use the fluxes to compute tendencies for each cell
+   thrust::counting_iterator<int> begin(0),end(NUM_VARS*nz*nx);
+-  std::for_each(std::execution::par,begin,end,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin,end,[=](int idx)
+       {
+         int ll= idx / (_nx*_nz);
+         int k = (idx/_nx) % _nz;
+@@ -322,7 +322,7 @@ void compute_tendencies_z( double *state , double *flux , double *tend ,
+   double _dz = dz;
+   //Compute fluxes in the x-direction for each cell
+   thrust::counting_iterator<int> begin1(0),end1(nx*(nz+1));
+-  std::for_each(std::execution::par,begin1,end1,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin1,end1,[=](int idx)
+       {
+         int i = idx%_nx;
+         int k = idx/_nx;
+@@ -360,7 +360,7 @@ void compute_tendencies_z( double *state , double *flux , double *tend ,
+ 
+   //Use the fluxes to compute tendencies for each cell
+   thrust::counting_iterator<int> begin(0),end(NUM_VARS*nz*nx);
+-  std::for_each(std::execution::par,begin,end,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin,end,[=](int idx)
+       {
+         int ll= idx / (_nx*_nz);
+         int k = (idx/_nx) % _nz;
+@@ -392,7 +392,7 @@ void set_halo_values_x( double *state, double *hy_dens_cell, double *hy_dens_the
+ 
+   //Pack the send buffers
+   thrust::counting_iterator<int> begin1(0),end1(NUM_VARS*nz*hs);
+-  std::for_each(std::execution::par,begin1,end1,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin1,end1,[=](int idx)
+     {
+       int ll = idx / (_nz*hs);
+       int k  = (idx/hs) % _nz;
+@@ -417,7 +417,7 @@ void set_halo_values_x( double *state, double *hy_dens_cell, double *hy_dens_the
+   ierr = MPI_Waitall(2,req_r,MPI_STATUSES_IGNORE);
+ 
+   //Unpack the receive buffers
+-  std::for_each(std::execution::par,begin1,end1,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin1,end1,[=](int idx)
+     {
+       int ll = idx / (_nz*hs);
+       int k  = (idx/hs) % _nz;
+@@ -440,7 +440,7 @@ void set_halo_values_x( double *state, double *hy_dens_cell, double *hy_dens_the
+   if (data_spec_int == DATA_SPEC_INJECTION) {
+     if (myrank == 0) {
+       thrust::counting_iterator<int> begin(0),end(hs*nz);
+-      std::for_each(std::execution::par,begin,end,[=](int idx)
++      std::for_each(std::execution::par_unseq,begin,end,[=](int idx)
+           {
+             int k = idx / hs;
+             int i = idx % hs;
+@@ -467,7 +467,7 @@ void set_halo_values_z( double *state ) {
+       _i_beg = i_beg;
+   double _dx = dx;
+   thrust::counting_iterator<int> begin(0),end(NUM_VARS*(nx+2*hs));
+-  std::for_each(std::execution::par,begin,end,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin,end,[=](int idx)
+       {
+         int ll = idx / (_nx+2*hs);
+         int i  = idx % (_nx+2*hs);
+@@ -904,7 +904,7 @@ void reductions( double &mass , double &te , double *state, double *hy_dens_cell
+ 	 _dz = dz;
+   auto start = std::make_pair(0.0,0.0);
+   thrust::counting_iterator<int> begin(0),end(nz*nx);
+-  auto results = std::transform_reduce( std::execution::par, begin, end, start,
++  auto results = std::transform_reduce( std::execution::par_unseq, begin, end, start,
+     [=](auto a, auto b)
+     {
+       return std::make_pair(a.first + b.first, a.second + b.second);
+diff --git a/cpp/miniWeather_stdpar.cpp b/cpp/miniWeather_stdpar.cpp
+index e0aa11a..36338cf 100644
+--- a/cpp/miniWeather_stdpar.cpp
++++ b/cpp/miniWeather_stdpar.cpp
+@@ -233,7 +233,7 @@ void semi_discrete_step( double *state_init , double *state_forcing , double *st
+   double _dt = dt;
+   //Apply the tendencies to the fluid state
+   thrust::counting_iterator<int> begin(0),end(NUM_VARS*nz*nx);
+-  std::for_each(std::execution::par,begin,end,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin,end,[=](int idx)
+       {
+         int ll= idx / (_nx*_nz);
+         int k = (idx/_nx) % _nz;
+@@ -258,7 +258,7 @@ void compute_tendencies_x( double *state , double *flux , double *tend ,
+   double _dx = dx;
+   //Compute fluxes in the x-direction for each cell
+   thrust::counting_iterator<int> begin1(0),end1((nx+1)*nz);
+-  std::for_each(std::execution::par,begin1,end1,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin1,end1,[=](int idx)
+       {
+         int i = idx%(_nx+1);
+         int k = idx/(_nx+1);
+@@ -291,7 +291,7 @@ void compute_tendencies_x( double *state , double *flux , double *tend ,
+ 
+   //Use the fluxes to compute tendencies for each cell
+   thrust::counting_iterator<int> begin(0),end(NUM_VARS*nz*nx);
+-  std::for_each(std::execution::par,begin,end,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin,end,[=](int idx)
+       {
+         int ll= idx / (_nx*_nz);
+         int k = (idx/_nx) % _nz;
+@@ -317,7 +317,7 @@ void compute_tendencies_z( double *state , double *flux , double *tend ,
+   double _dz = dz;
+   //Compute fluxes in the x-direction for each cell
+   thrust::counting_iterator<int> begin1(0),end1(nx*(nz+1));
+-  std::for_each(std::execution::par,begin1,end1,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin1,end1,[=](int idx)
+       {
+         int i = idx%_nx;
+         int k = idx/_nx;
+@@ -355,7 +355,7 @@ void compute_tendencies_z( double *state , double *flux , double *tend ,
+ 
+   //Use the fluxes to compute tendencies for each cell
+   thrust::counting_iterator<int> begin(0),end(NUM_VARS*nz*nx);
+-  std::for_each(std::execution::par,begin,end,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin,end,[=](int idx)
+       {
+         int ll= idx / (_nx*_nz);
+         int k = (idx/_nx) % _nz;
+@@ -390,7 +390,7 @@ void set_halo_values_x( double *state, double *hy_dens_cell, double *hy_dens_the
+       _nz = nz;
+   double _dz = dz;
+   thrust::counting_iterator<int> begin1(0),end1(NUM_VARS*nz);
+-  std::for_each(std::execution::par,begin1,end1,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin1,end1,[=](int idx)
+       {
+         int k  = idx % _nz;
+         int ll = idx / _nz;
+@@ -404,7 +404,7 @@ void set_halo_values_x( double *state, double *hy_dens_cell, double *hy_dens_the
+   if (data_spec_int == DATA_SPEC_INJECTION) {
+     if (myrank == 0) {
+       thrust::counting_iterator<int> begin(0),end(hs*nz);
+-      std::for_each(std::execution::par,begin,end,[=](int idx)
++      std::for_each(std::execution::par_unseq,begin,end,[=](int idx)
+           {
+             int k = idx / hs;
+             int i = idx % hs;
+@@ -431,7 +431,7 @@ void set_halo_values_z( double *state ) {
+       _i_beg = i_beg;
+   double _dx = dx;
+   thrust::counting_iterator<int> begin(0),end(NUM_VARS*(nx+2*hs));
+-  std::for_each(std::execution::par,begin,end,[=](int idx)
++  std::for_each(std::execution::par_unseq,begin,end,[=](int idx)
+       {
+         int ll = idx / (_nx+2*hs);
+         int i  = idx % (_nx+2*hs);
+@@ -867,7 +867,7 @@ void reductions( double &mass , double &te , double *state, double *hy_dens_cell
+ 	 _dz = dz;
+   auto start = std::make_pair(0.0,0.0);
+   thrust::counting_iterator<int> begin(0),end(nz*nx);
+-  auto results = std::transform_reduce( std::execution::par, begin, end, start,
++  auto results = std::transform_reduce( std::execution::par_unseq, begin, end, start,
+     [=](auto a, auto b)
+     {
+       return std::make_pair(a.first + b.first, a.second + b.second);
