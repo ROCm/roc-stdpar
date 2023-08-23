@@ -306,19 +306,23 @@
         constexpr
         bool is_offloadable_iterator() noexcept
         {
-            return std::conjunction_v<
-                std::negation<std::is_same<
-                    typename std::iterator_traits<Is>::iterator_category,
-                    std::input_iterator_tag>>...,
-                std::negation<std::is_same<
-                    typename std::iterator_traits<Is>::iterator_category,
-                    std::output_iterator_tag>>...,
-                std::negation<std::is_same<
-                    typename std::iterator_traits<Is>::iterator_category,
-                    std::forward_iterator_tag>>...,
-                std::negation<std::is_same<
-                    typename std::iterator_traits<Is>::iterator_category,
-                    std::bidirectional_iterator_tag>>...>;
+            #if defined(__cpp_lib_concepts)
+                return (... && std::random_access_iterator<Is>);
+            #else
+                return std::conjunction_v<
+                    std::negation<std::is_same<
+                        typename std::iterator_traits<Is>::iterator_category,
+                        std::input_iterator_tag>>...,
+                    std::negation<std::is_same<
+                        typename std::iterator_traits<Is>::iterator_category,
+                        std::output_iterator_tag>>...,
+                    std::negation<std::is_same<
+                        typename std::iterator_traits<Is>::iterator_category,
+                        std::forward_iterator_tag>>...,
+                    std::negation<std::is_same<
+                        typename std::iterator_traits<Is>::iterator_category,
+                        std::bidirectional_iterator_tag>>...>;
+            #endif
         }
 
         template<typename... Cs>
@@ -1229,7 +1233,7 @@
                 !::hipstd::is_offloadable_iterator<I>() ||
                 !::hipstd::is_offloadable_callable<F>()>* = nullptr>
         inline
-        I for_each(execution::parallel_unsequenced_policy, I f, N n, F fn)
+        I for_each_n(execution::parallel_unsequenced_policy, I f, N n, F fn)
         {
             if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
                 ::hipstd::unsupported_iterator_category<
