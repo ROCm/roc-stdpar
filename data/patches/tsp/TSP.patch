@@ -1,5 +1,5 @@
 diff --git a/stdpar/Makefile b/stdpar/Makefile
-index 96b6d9d..82929ee 100644
+index 96b6d9d..1bd860f 100644
 --- a/stdpar/Makefile
 +++ b/stdpar/Makefile
 @@ -32,9 +32,19 @@ tsp_pgi_stdpar_gpu: tsp.cpp tsp_utils.h route_cost.h route_iterator.h counting_i
@@ -14,7 +14,7 @@ index 96b6d9d..82929ee 100644
 +	${STDPAR_CXX} -O3 -march=native -std=c++17 -fopenmp-simd $< -o $@ -L${TBB_LIB} -ltbb
 +
 +tsp_clang_stdpar_gpu: tsp.cpp tsp_utils.h route_cost.h route_iterator.h counting_iterator.h
-+	${STDPAR_CXX} -O3 -march=native -std=c++17 -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} $< -o $@
++	${STDPAR_CXX} -O3 -march=native -std=c++17 --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} $< -o $@
 +
 +all: tsp_gnu_stdpar_cpu tsp_pgi_stdpar_cpu tsp_clang_stdpar_cpu
  

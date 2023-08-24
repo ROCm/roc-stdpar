@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 94be7ee..37c9574 100644
+index 94be7ee..f5946a5 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -34,6 +34,20 @@ set(NVHPC_OFFLOAD_GPU "OFF"
@@ -8,7 +8,7 @@ index 94be7ee..37c9574 100644
          "Enable PSTL multicore support (via the non-standard `-stdpar`) for the NVHPC SDK.")
 +set(CLANG_OFFLOAD_GPU OFF
 +        CACHE STRING
-+        "Enable offloading support (via the non-standard `-stdpar`) for Clang/LLVM.
++        "Enable offloading support (via the non-standard `-hipstdpar`) for Clang/LLVM.
 +         The values are AMDGPU processors (https://www.llvm.org/docs/AMDGPUUsage.html#processors)
 +         which will be passed in via `--offload-arch=` argument.
 +         Example values are:
@@ -31,12 +31,12 @@ index 94be7ee..37c9574 100644
 +    message(FATAL_ERROR "CLANG_OFFLOAD_GPU and CLANG_OFFLOAD_CPU are mutually exclusive.")
 +else ()
 +    if (CLANG_OFFLOAD_GPU)
-+        set(FLAGS -stdpar --stdpar-path=${CLANG_STDPAR_PATH} --offload-arch=${CLANG_OFFLOAD_GPU})
++        set(FLAGS --hipstdpar --hipstdpar-path=${CLANG_STDPAR_PATH} --offload-arch=${CLANG_OFFLOAD_GPU})
 +        if (NOT CLANG_OFFLOAD MATCHES "^gfx9")
-+            list(APPEND CLANG_FLAGS --stdpar-interpose-alloc)
++            list(APPEND CLANG_FLAGS --hipstdpar-interpose-alloc)
 +        endif ()
 +        target_compile_options(stdpar-mandelbrot PRIVATE ${FLAGS})
-+        target_link_options(stdpar-mandelbrot PRIVATE -stdpar)
++        target_link_options(stdpar-mandelbrot PRIVATE --hipstdpar)
 +    elseif (CLANG_OFFLOAD_CPU)
 +        set(FLAGS -ffast-math -Ofast -march=native)
 +    else ()

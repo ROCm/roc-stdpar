@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 4b98dd5..e503f4d 100644
+index 4b98dd5..a6f6056 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -2,14 +2,63 @@ cmake_minimum_required(VERSION 3.12)
+@@ -2,14 +2,62 @@ cmake_minimum_required(VERSION 3.12)
  project(p2r_kokkos CXX) # C++ needed to build my project
  #find_package(Kokkos REQUIRED) # fail if Kokkos not found
  
@@ -26,17 +26,16 @@ index 4b98dd5..e503f4d 100644
 +            ${CMAKE_CURRENT_SOURCE_DIR}/src/propagate-tor-test_pstl.cpp)
 +    target_compile_options(
 +        clang_stdpar_gpu PRIVATE
-+            --stdpar
-+            --stdpar-path=${STDPAR_PATH}
++            --hipstdpar
++            --hipstdpar-path=${STDPAR_PATH}
 +            --offload-arch=${STDPAR_TARGET}
-+            -ffast-math
-+            --save-temps)
++            -ffast-math)
 +        if (NOT STDPAR_TARGET MATCHES "^gfx9")
 +            target_compile_options(
-+                clang_stdpar_gpu PRIVATE --stdpar-interpose-alloc)
++                clang_stdpar_gpu PRIVATE --hipstdpar-interpose-alloc)
 +        endif ()
 +    target_link_libraries(clang_stdpar_gpu PRIVATE m)
-+    target_link_options(clang_stdpar_gpu PRIVATE -stdpar)
++    target_link_options(clang_stdpar_gpu PRIVATE -hipstdpar)
  
 -# declare dependency on Kokkos, build p2r together with Kokkos, inheriting all the kokkos flags
 -#target_link_libraries(p2r_kokkos PRIVATE Kokkos::kokkos)    ## standalone build
@@ -75,7 +74,7 @@ index 4b98dd5..e503f4d 100644
 +    target_link_libraries(p2r_kokkos Kokkos::kokkos)             ## JLSE build
 +endif ()
 diff --git a/build.py b/build.py
-index 82c5b09..c5ae23e 100755
+index 82c5b09..ffa738a 100755
 --- a/build.py
 +++ b/build.py
 @@ -35,7 +35,7 @@ technologies = {
@@ -94,9 +93,9 @@ index 82c5b09..c5ae23e 100755
 +    if compiler == "clang":
 +        cmd.extend(["clang++", "-Wall", "-Isrc", "-O3", "-fopenmp-simd", "-march=native", "-std=c++17",'-lm',"-ltbb"])
 +    if compiler == "clang_gpu":
-+        cmd.extend([os.path.expandvars("$STDPAR_CXX"), "-Wall", "-Isrc", "-O3", "-march=native", "-std=c++17",'-lm',"-ltbb", "--stdpar", os.path.expandvars("--stdpar-path=$STDPAR_PATH"), os.path.expandvars("--offload-arch=$STDPAR_TARGET")])
++        cmd.extend([os.path.expandvars("$STDPAR_CXX"), "-Wall", "-Isrc", "-O3", "-march=native", "-std=c++17",'-lm',"-ltbb", "--hipstdpar", os.path.expandvars("--hipstdpar-path=$STDPAR_PATH"), os.path.expandvars("--offload-arch=$STDPAR_TARGET")])
 +        if not os.path.expandvars("$STDPAR_TARGET").startswith("gfx9"):
-+            cmd.append("--stdpar-interpose-alloc")
++            cmd.append("--hipstdpar-interpose-alloc")
 +
      cmd.extend(["-o", target, source])
  

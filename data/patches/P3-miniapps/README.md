@@ -7,7 +7,7 @@
     CMake variable, and it's used to select Clang/LLVM Standard Algorithm
     offloading when the `STDPAR` value passed to CMake via the
     `PROGRAMMING_MODEL` variable
-  - the `__STDPAR__` macro is used to control conditional compilation
+  - the `__HIPSTDPAR__` macro is used to control conditional compilation
     equivalently to `_NVHPC_STDPAR_GPU`
   - HIP equivalents are used for FFTs and transpositions when usinc Clang/LLVM
     offload

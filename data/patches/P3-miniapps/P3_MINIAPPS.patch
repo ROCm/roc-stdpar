@@ -16,95 +16,11 @@ index e691a7c..16461cb 100644
  add_subdirectory(lib)
  
  include(CTest)
-diff --git a/lib/Iteration.hpp b/lib/Iteration.hpp
-index 11ff7d8..e98435b 100644
---- a/lib/Iteration.hpp
-+++ b/lib/Iteration.hpp
-@@ -73,4 +73,79 @@ private:
-   }
- };
- 
-+/*
-+ * This class is borrowed from Lulesh:
-+ * https://github.com/LLNL/LULESH
-+ */
-+template<typename T>
-+struct Counting_iterator
-+{
-+
-+private:
-+  using self = Counting_iterator;
-+
-+public:
-+  using Index_t = T;
-+  using value_type = Index_t;
-+  using difference_type = typename std::make_signed<T>::type;
-+  using pointer = Index_t*;
-+  using reference = Index_t&;
-+  using iterator_category = std::random_access_iterator_tag;
-+
-+  Counting_iterator() : value(0) { }
-+  explicit Counting_iterator(value_type v) : value(v) { }
-+
-+  value_type operator*() const { return value; }
-+  value_type operator[](difference_type n) const { return value + n; }
-+
-+  self& operator++() { ++value; return *this; }
-+  self operator++(int) {
-+    self result{value};
-+    ++value;
-+    return result;
-+  }
-+  self& operator--() { --value; return *this; }
-+  self operator--(int) {
-+    self result{value};
-+    --value;
-+    return result;
-+  }
-+  self& operator+=(difference_type n) { value += n; return *this; }
-+  self& operator-=(difference_type n) { value -= n; return *this; }
-+
-+  friend self operator+(self const& i, difference_type n) {
-+    return self(i.value + n);
-+  }
-+  friend self operator+(difference_type n, self const& i) {
-+    return self(i.value + n);
-+  }
-+  friend difference_type operator-(self const& x, self const& y) {
-+    return x.value - y.value;
-+  }
-+  friend self operator-(self const& i, difference_type n) {
-+    return self(i.value - n);
-+  }
-+
-+  friend bool operator==(self const& x, self const& y) {
-+    return x.value == y.value;
-+  }
-+  friend bool operator!=(self const& x, self const& y) {
-+    return x.value != y.value;
-+  }
-+  friend bool operator<(self const& x, self const& y) {
-+    return x.value < y.value;
-+  }
-+  friend bool operator<=(self const& x, self const& y) {
-+    return x.value <= y.value;
-+  }
-+  friend bool operator>(self const& x, self const& y) {
-+    return x.value > y.value;
-+  }
-+  friend bool operator>=(self const& x, self const& y) {
-+    return x.value >= y.value;
-+  }
-+private:
-+  value_type value;
-+};
-+
- #endif
 diff --git a/lib/stdpar/CMakeLists.txt b/lib/stdpar/CMakeLists.txt
-index 0eecba7..c5ba1ac 100644
+index 0eecba7..a0ac230 100644
 --- a/lib/stdpar/CMakeLists.txt
 +++ b/lib/stdpar/CMakeLists.txt
-@@ -12,8 +12,24 @@ elseif(BACKEND STREQUAL "OPENMP")
+@@ -12,8 +12,27 @@ elseif(BACKEND STREQUAL "OPENMP")
      target_link_libraries(math_lib INTERFACE std::mdspan OpenMP::OpenMP_CXX fftw3)
      target_compile_definitions(math_lib INTERFACE ENABLE_OPENMP ENABLE_STDPAR)
      target_compile_options(math_lib INTERFACE -O3)
@@ -114,8 +30,11 @@ index 0eecba7..c5ba1ac 100644
 +        find_package(rocfft REQUIRED)
 +        target_link_libraries(math_lib INTERFACE std::mdspan roc::rocblas roc::rocfft)
 +        target_compile_definitions(math_lib INTERFACE ENABLE_HIP ENABLE_STDPAR)
-+        target_compile_options(math_lib INTERFACE -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
-+        target_link_options(math_lib INTERFACE -stdpar)
++        target_compile_options(math_lib INTERFACE --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++        if(NOT STDPAR_TARGET MATCHES "^gfx9")
++            target_compile_options(math_lib INTERFACE --hipstdpar-interpose-alloc)
++        endif()
++        target_link_options(math_lib INTERFACE --hipstdpar)
 +    else()
 +        find_package(FFTW REQUIRED COMPONENTS DOUBLE_LIB)
 +        target_link_libraries(math_lib INTERFACE std::mdspan fftw3)
@@ -131,89 +50,46 @@ index 0eecba7..c5ba1ac 100644
  
  if(${CMAKE_CXX_COMPILER_ID} STREQUAL NVHPC)
 diff --git a/lib/stdpar/FFT.hpp b/lib/stdpar/FFT.hpp
-index a1a5d20..cda7c7f 100644
+index a1a5d20..98fc915 100644
 --- a/lib/stdpar/FFT.hpp
 +++ b/lib/stdpar/FFT.hpp
 @@ -3,6 +3,8 @@
  
  #if defined( _NVHPC_STDPAR_GPU )
    #include "../Cuda_FFT.hpp"
-+#elif defined( __STDPAR__ )
++#elif defined( __HIPSTDPAR__ )
 +  #include "../HIP_FFT.hpp"
  #else
    #include "../OpenMP_FFT.hpp"
  #endif
-diff --git a/lib/stdpar/Parallel_For.hpp b/lib/stdpar/Parallel_For.hpp
-index 31b2339..dabdc19 100644
---- a/lib/stdpar/Parallel_For.hpp
-+++ b/lib/stdpar/Parallel_For.hpp
-@@ -1,10 +1,9 @@
- #ifndef __PARALLEL_FOR_HPP__
- #define __PARALLEL_FOR_HPP__
- 
--#include <thrust/iterator/counting_iterator.h>
- #include "../Iteration.hpp"
- 
--using counting_iterator = thrust::counting_iterator<int>;
-+using counting_iterator = Counting_iterator<int>;
- 
- namespace Impl {
-   // Only for 1D case
-diff --git a/lib/stdpar/Parallel_Reduce.hpp b/lib/stdpar/Parallel_Reduce.hpp
-index 424bcf0..d55f23e 100644
---- a/lib/stdpar/Parallel_Reduce.hpp
-+++ b/lib/stdpar/Parallel_Reduce.hpp
-@@ -1,10 +1,9 @@
- #ifndef __PARALLEL_REDUCE_HPP__
- #define __PARALLEL_REDUCE_HPP__
- 
--#include <thrust/iterator/counting_iterator.h>
- #include "../Iteration.hpp"
- 
--using counting_iterator = thrust::counting_iterator<int>;
-+using counting_iterator = Counting_iterator<int>;
- 
- namespace Impl {
-   // Only for 1D case
 diff --git a/lib/stdpar/Transpose.hpp b/lib/stdpar/Transpose.hpp
-index 70e6044..6935a47 100644
+index 70e6044..6177794 100644
 --- a/lib/stdpar/Transpose.hpp
 +++ b/lib/stdpar/Transpose.hpp
 @@ -3,6 +3,8 @@
  
  #if defined( _NVHPC_STDPAR_GPU )
    #include "../Cuda_Transpose.hpp"
-+#elif defined( __STDPAR__ )
++#elif defined( __HIPSTDPAR__ )
 +  #include "../HIP_Transpose.hpp"
  #else
    #include "../OpenMP_Transpose.hpp"
  #endif
-diff --git a/miniapps/CMakeLists.txt b/miniapps/CMakeLists.txt
-index 7314647..fb2b2d9 100644
---- a/miniapps/CMakeLists.txt
-+++ b/miniapps/CMakeLists.txt
-@@ -9,7 +9,7 @@ elseif(APPLICATION STREQUAL "vlp4d_mpi")
- else()
-     # Default: all miniapps
-     add_subdirectory(heat3d)
--    add_subdirectory(heat3d_mpi)
-+    # add_subdirectory(heat3d_mpi)
-     add_subdirectory(vlp4d)
--    add_subdirectory(vlp4d_mpi)
-+    # add_subdirectory(vlp4d_mpi)
- endif()
 diff --git a/miniapps/heat3d/stdpar/CMakeLists.txt b/miniapps/heat3d/stdpar/CMakeLists.txt
-index 1426bde..6fc868d 100644
+index 1426bde..f8cff00 100644
 --- a/miniapps/heat3d/stdpar/CMakeLists.txt
 +++ b/miniapps/heat3d/stdpar/CMakeLists.txt
-@@ -15,8 +15,16 @@ if(BACKEND STREQUAL "CUDA")
+@@ -15,8 +15,19 @@ if(BACKEND STREQUAL "CUDA")
      target_link_options(heat3d PUBLIC -stdpar=gpu)
  elseif(BACKEND STREQUAL "OPENMP")
      target_compile_options(heat3d PUBLIC -stdpar=multicore)
 +elseif(BACKEND STREQUAL "CLANG")
 +    if(DEFINED STDPAR_PATH)
-+        target_compile_options(heat3d PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
-+        target_link_options(heat3d PUBLIC -stdpar)
++        target_compile_options(heat3d PUBLIC --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} --save-temps --hipstdpar-interpose-alloc)
++        if(NOT STDPAR_TARGET MATCHES "^gfx9")
++            target_compile_options(heat3d PUBLIC --hipstdpar-interpose-alloc)
++        endif()
++        target_link_options(heat3d PUBLIC --hipstdpar)
 +    else()
 +        target_compile_options(heat3d PUBLIC -fopenmp-simd -march=native)
 +        target_link_libraries(heat3d PUBLIC tbb)
@@ -225,20 +101,20 @@ index 1426bde..6fc868d 100644
  
  # Macro
 diff --git a/miniapps/heat3d/stdpar/Init.hpp b/miniapps/heat3d/stdpar/Init.hpp
-index 84c74f2..e81b7f5 100644
+index 84c74f2..40fa726 100644
 --- a/miniapps/heat3d/stdpar/Init.hpp
 +++ b/miniapps/heat3d/stdpar/Init.hpp
 @@ -116,6 +116,8 @@ void performance(Config &conf, double seconds) {
      std::string backend = "CUDA";
    #elif defined( ENABLE_OPENMP )
      std::string backend = "OPENMP";
-+  #elif defined( __STDPAR__ )
++  #elif defined( __HIPSTDPAR__ )
 +    std::string backend = "CLANG";
    #else
      std::string backend = "OPENMP";
    #endif
 diff --git a/miniapps/heat3d/stdpar/types.hpp b/miniapps/heat3d/stdpar/types.hpp
-index ae88da4..498060b 100644
+index ae88da4..aa3d413 100644
 --- a/miniapps/heat3d/stdpar/types.hpp
 +++ b/miniapps/heat3d/stdpar/types.hpp
 @@ -7,7 +7,7 @@
@@ -246,22 +122,25 @@ index ae88da4..498060b 100644
  namespace stdex = std::experimental;
  
 -#if defined( _NVHPC_STDPAR_GPU )
-+#if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
++#if defined( _NVHPC_STDPAR_GPU ) || defined( __HIPSTDPAR__ )
    #define SIMD_LOOP
    #define SIMD_WIDTH 1
    using default_layout = stdex::layout_left;
 diff --git a/miniapps/heat3d_mpi/stdpar/CMakeLists.txt b/miniapps/heat3d_mpi/stdpar/CMakeLists.txt
-index 1495637..89a9582 100644
+index 1495637..52bac91 100644
 --- a/miniapps/heat3d_mpi/stdpar/CMakeLists.txt
 +++ b/miniapps/heat3d_mpi/stdpar/CMakeLists.txt
-@@ -18,8 +18,16 @@ if(BACKEND STREQUAL "CUDA")
+@@ -18,8 +18,19 @@ if(BACKEND STREQUAL "CUDA")
      target_link_options(heat3d_mpi PUBLIC -stdpar=gpu)
  elseif(BACKEND STREQUAL "OPENMP")
      target_compile_options(heat3d_mpi PUBLIC -stdpar=multicore)
 +elseif(BACKEND STREQUAL "CLANG")
 +    if(DEFINED STDPAR_PATH)
-+        target_compile_options(heat3d_mpi PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
-+        target_link_options(heat3d_mpi PUBLIC -stdpar)
++        target_compile_options(heat3d_mpi PUBLIC --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++        if(NOT STDPAR_TARGET MATCHES "^gfx9")
++            target_compile_options(heat3d_mpi PUBLIC --hipstdpar-interpose-alloc)
++        endif()
++        target_link_options(heat3d_mpi PUBLIC --hipstdpar)
 +    else()
 +        target_compile_options(heat3d_mpi PUBLIC -fopenmp-simd -march=native)
 +        target_link_libraries(heat3d_mpi PUBLIC tbb)
@@ -273,7 +152,7 @@ index 1495637..89a9582 100644
  
  # Macro
 diff --git a/miniapps/heat3d_mpi/stdpar/Init.hpp b/miniapps/heat3d_mpi/stdpar/Init.hpp
-index f51beda..1efcb50 100644
+index f51beda..49dd286 100644
 --- a/miniapps/heat3d_mpi/stdpar/Init.hpp
 +++ b/miniapps/heat3d_mpi/stdpar/Init.hpp
 @@ -201,7 +201,7 @@ void performance(Config &conf, Comm &comm, double seconds) {
@@ -281,12 +160,12 @@ index f51beda..1efcb50 100644
  
    std::string backend = "STDPAR";
 -  #if defined( _NVHPC_STDPAR_GPU )
-+  #if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
++  #if defined( _NVHPC_STDPAR_GPU ) || defined( __HIPSTDPAR__ )
      std::string arch = "GPU";
    #else
      std::string arch = "CPU";
 diff --git a/miniapps/heat3d_mpi/stdpar/Types.hpp b/miniapps/heat3d_mpi/stdpar/Types.hpp
-index 249876d..6c878fe 100644
+index 249876d..85b923f 100644
 --- a/miniapps/heat3d_mpi/stdpar/Types.hpp
 +++ b/miniapps/heat3d_mpi/stdpar/Types.hpp
 @@ -7,7 +7,7 @@
@@ -294,23 +173,26 @@ index 249876d..6c878fe 100644
  namespace stdex = std::experimental;
  
 -#if defined( _NVHPC_STDPAR_GPU )
-+#if defined( _NVHPC_STDPAR_GPU ) || defined( __STDPAR__ )
++#if defined( _NVHPC_STDPAR_GPU ) || defined( __HIPSTDPAR__ )
    #define SIMD_LOOP
    #define SIMD_WIDTH 1
    using default_layout = stdex::layout_left;
 diff --git a/miniapps/vlp4d/stdpar/CMakeLists.txt b/miniapps/vlp4d/stdpar/CMakeLists.txt
-index ca5d616..34d03ea 100644
+index ca5d616..c82d7ad 100644
 --- a/miniapps/vlp4d/stdpar/CMakeLists.txt
 +++ b/miniapps/vlp4d/stdpar/CMakeLists.txt
-@@ -8,6 +8,18 @@ set(BACKEND AUTO CACHE STRING "CHOICE OF PARALLEL BACKEND")
+@@ -8,6 +8,21 @@ set(BACKEND AUTO CACHE STRING "CHOICE OF PARALLEL BACKEND")
  if(BACKEND STREQUAL "CUDA")
      target_compile_options(vlp4d PUBLIC -O3 -stdpar=gpu)
      target_link_options(vlp4d PUBLIC -stdpar=gpu -cudalib=cufft)
 +elseif(BACKEND STREQUAL "CLANG")
 +    if(DEFINED STDPAR_PATH)
 +        find_package(rocfft REQUIRED)
-+        target_compile_options(vlp4d PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} --stdpar-interpose-alloc)
-+        target_link_options(vlp4d PUBLIC -stdpar)
++        target_compile_options(vlp4d PUBLIC --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++        if(NOT STDPAR_TARGET MATCHES "^gfx9")
++            target_compile_options(vlp4d PUBLIC --hipstdpar-interpose-alloc)
++        endif()
++        target_link_options(vlp4d PUBLIC --hipstdpar)
 +        target_link_libraries(vlp4d PUBLIC roc::rocfft)
 +    else()
 +        target_compile_definitions(vlp4d PUBLIC SIMD)
@@ -322,35 +204,35 @@ index ca5d616..34d03ea 100644
      target_compile_options(vlp4d PUBLIC -O3 -stdpar=multicore -mp)
      target_compile_definitions(vlp4d PUBLIC SIMD)
 diff --git a/miniapps/vlp4d/stdpar/diags.hpp b/miniapps/vlp4d/stdpar/diags.hpp
-index 8be727a..b38c67c 100644
+index 8be727a..999a9b3 100644
 --- a/miniapps/vlp4d/stdpar/diags.hpp
 +++ b/miniapps/vlp4d/stdpar/diags.hpp
 @@ -13,6 +13,9 @@ private:
  
  public:
    Diags(Config *conf);
-+  #if defined(__STDPAR__)
++  #if defined(__HIPSTDPAR__)
 +    Diags(const Diags&) = delete;
 +  #endif
    virtual ~Diags();
  
    void compute(Config *conf, Efield *ef, int iter);
 diff --git a/miniapps/vlp4d/stdpar/efield.hpp b/miniapps/vlp4d/stdpar/efield.hpp
-index 590f138..8a06350 100644
+index 590f138..878f518 100644
 --- a/miniapps/vlp4d/stdpar/efield.hpp
 +++ b/miniapps/vlp4d/stdpar/efield.hpp
 @@ -26,6 +26,9 @@ private:
  
  public:
    Efield(Config *conf, shape_nd<2> dim);
-+  #if defined(__STDPAR__)
++  #if defined(__HIPSTDPAR__)
 +    Efield(const Efield&) = delete;
 +  #endif
    virtual ~Efield();
  
    void solve_poisson_fftw(double xmax, double ymax);
 diff --git a/miniapps/vlp4d/stdpar/types.hpp b/miniapps/vlp4d/stdpar/types.hpp
-index 1b29915..2b80c7f 100644
+index 1b29915..8284f0b 100644
 --- a/miniapps/vlp4d/stdpar/types.hpp
 +++ b/miniapps/vlp4d/stdpar/types.hpp
 @@ -9,7 +9,7 @@
@@ -358,15 +240,15 @@ index 1b29915..2b80c7f 100644
  namespace stdex = std::experimental;
  
 -#if defined( _NVHPC_STDPAR_GPU )
-+#if defined( _NVHPC_STDPAR_GPU ) || defined(__STDPAR__)
++#if defined( _NVHPC_STDPAR_GPU ) || defined(__HIPSTDPAR__)
    #define SIMD_LOOP
    #define SIMD_WIDTH 1
    using default_layout = stdex::layout_left;
 diff --git a/tests/stdpar/CMakeLists.txt b/tests/stdpar/CMakeLists.txt
-index 1429cb8..0fbe89e 100644
+index 1429cb8..2de9d73 100644
 --- a/tests/stdpar/CMakeLists.txt
 +++ b/tests/stdpar/CMakeLists.txt
-@@ -11,6 +11,18 @@ if(BACKEND STREQUAL "CUDA")
+@@ -11,6 +11,21 @@ if(BACKEND STREQUAL "CUDA")
      target_link_options(google_tests PUBLIC -stdpar=gpu -cudalib=cufft,cublas)
  elseif(BACKEND STREQUAL "OPENMP")
      target_compile_options(google_tests PUBLIC -O3 -stdpar=multicore -mp)
@@ -374,9 +256,12 @@ index 1429cb8..0fbe89e 100644
 +    if(DEFINED STDPAR_PATH)
 +        find_package(rocblas REQUIRED)
 +        find_package(rocfft REQUIRED)
-+        target_compile_options(google_tests PUBLIC -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++        target_compile_options(google_tests PUBLIC --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++        if(NOT STDPAR_TARGET MATCHES "^gfx9")
++            target_compile_options(google_tests PUBLIC --hipstdpar-interpose-alloc)
++        endif()
 +        target_link_libraries(google_tests PUBLIC roc::rocblas roc::rocfft)
-+        target_link_options(google_tests PUBLIC -stdpar)
++        target_link_options(google_tests PUBLIC --hipstdpar)
 +    else()
 +        target_compile_options(google_tests PUBLIC -march=native -fopenmp)
 +        target_link_options(google_tests PUBLIC -fopenmp)
@@ -386,7 +271,7 @@ index 1429cb8..0fbe89e 100644
      message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
  endif()
 diff --git a/tests/stdpar/Types.hpp b/tests/stdpar/Types.hpp
-index 3344d9c..e30ef2d 100644
+index 3344d9c..f3e3413 100644
 --- a/tests/stdpar/Types.hpp
 +++ b/tests/stdpar/Types.hpp
 @@ -9,7 +9,7 @@
@@ -394,12 +279,12 @@ index 3344d9c..e30ef2d 100644
  namespace stdex = std::experimental;
  
 -#if defined( _NVHPC_STDPAR_GPU )
-+#if defined( _NVHPC_STDPAR_GPU ) || defined ( __STDPAR__ )
++#if defined( _NVHPC_STDPAR_GPU ) || defined ( __HIPSTDPAR__ )
    #define SIMD_LOOP
    #define SIMD_WIDTH 1
    using default_layout = stdex::layout_left;
 diff --git a/tests/stdpar/test_view.cpp b/tests/stdpar/test_view.cpp
-index b5935a5..8ba5e75 100644
+index b5935a5..bd4f77d 100644
 --- a/tests/stdpar/test_view.cpp
 +++ b/tests/stdpar/test_view.cpp
 @@ -28,7 +28,8 @@ void set_inside_function(RealView2D shallow_copy_to_a_View) {
@@ -407,7 +292,7 @@ index b5935a5..8ba5e75 100644
  }
  
 -void test_copy_constructor() {
-+#if !defined(__STDPAR__) && !defined(__GNUC__)
++#if !defined(__HIPSTDPAR__) && !defined(__GNUC__)
 +  void test_copy_constructor() {
      RealView2D simple("simple", 16, 16);
      RealView2D reference("reference", 16, 16);
@@ -427,7 +312,7 @@ index b5935a5..8ba5e75 100644
  }
  
 -TEST( VIEW, COPY_CONSTRUCTOR ) {
-+#if !defined(__STDPAR__) && !defined(__GNUC__)
++#if !defined(__HIPSTDPAR__) && !defined(__GNUC__)
 +  TEST( VIEW, COPY_CONSTRUCTOR ) {
      test_copy_constructor();
 -}

@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 5cb9198..91fee0f 100644
+index 5cb9198..54afd6d 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -157,7 +157,7 @@ endif()
@@ -17,7 +17,7 @@ index 5cb9198..91fee0f 100644
    set( TRACCC_STDPAR_BACKEND_FLAG "-nostdpar")
 +elseif(${TRACCC_STDPAR_BACKEND} MATCHES "clang")
 +  if (DEFINED TRACCC_STDPAR_PATH)
-+   set( TRACCC_STDPAR_BACKEND_FLAG "-stdpar")
++   set( TRACCC_STDPAR_BACKEND_FLAG "--hipstdpar")
 +  endif ()
  else()
 -  message(FATAL_ERROR "The backend for C++ Parallel Algorithms is unkown. Choose one of the following values: gpu|multicore|none")
@@ -26,7 +26,7 @@ index 5cb9198..91fee0f 100644
  
  # option for algebra plugins (ARRAY EIGEN SMATRIX VC VECMEM)
 diff --git a/benchmarks/stdpar/CMakeLists.txt b/benchmarks/stdpar/CMakeLists.txt
-index c82238b..4164b85 100644
+index c82238b..69271e9 100644
 --- a/benchmarks/stdpar/CMakeLists.txt
 +++ b/benchmarks/stdpar/CMakeLists.txt
 @@ -2,8 +2,10 @@ cmake_minimum_required(VERSION 3.14)
@@ -42,7 +42,7 @@ index c82238b..4164b85 100644
  
  traccc_add_executable( benchmark_stdpar_cca "stdpar_cca.cpp"
      LINK_LIBRARIES traccc::core traccc::io traccc_benchmarks_common
-@@ -11,4 +13,15 @@ traccc_add_executable( benchmark_stdpar_cca "stdpar_cca.cpp"
+@@ -11,4 +13,18 @@ traccc_add_executable( benchmark_stdpar_cca "stdpar_cca.cpp"
  
  set (LIB "traccc_benchmark_stdpar_cca")
  target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
@@ -51,8 +51,11 @@ index c82238b..4164b85 100644
 +    if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
 +        target_compile_options( ${LIB} PRIVATE
 +            ${TRACCC_STDPAR_BACKEND_FLAG}
-+            --stdpar-path=${TRACCC_STDPAR_PATH}
++            --hipstdpar-path=${TRACCC_STDPAR_PATH}
 +            --offload-arch=${TRACCC_STDPAR_TARGET})
++        if (NOT TRACCC_STDPAR_TARGET MATCHES "^gfx9")
++            target_compile_options( ${LIB} PRIVATE --hipstdpar-interpose-alloc)
++        endif ()
 +        target_link_options( ${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +    else ()
 +        target_compile_options(${LIB} PRIVATE -march=native -fopenmp-simd)
@@ -60,11 +63,30 @@ index c82238b..4164b85 100644
 +    target_link_libraries(${LIB} PRIVATE tbb)
 +endif ()
 \ No newline at end of file
+diff --git a/core/src/seeding/seed_filtering.cpp b/core/src/seeding/seed_filtering.cpp
+index b5678c0..072e238 100644
+--- a/core/src/seeding/seed_filtering.cpp
++++ b/core/src/seeding/seed_filtering.cpp
+@@ -59,10 +59,10 @@ void seed_filtering::operator()(
+                       auto& spB2 = sp_container.at(seed2.spB_link);
+                       auto& spT2 = sp_container.at(seed2.spT_link);
+ 
+-                      seed1_sum += pow(spB1.y(), 2) + pow(spB1.z(), 2);
+-                      seed1_sum += pow(spT1.y(), 2) + pow(spT1.z(), 2);
+-                      seed2_sum += pow(spB2.y(), 2) + pow(spB2.z(), 2);
+-                      seed2_sum += pow(spT2.y(), 2) + pow(spT2.z(), 2);
++                      seed1_sum += pow(spB1.y(), 2.) + pow(spB1.z(), 2.);
++                      seed1_sum += pow(spT1.y(), 2.) + pow(spT1.z(), 2.);
++                      seed2_sum += pow(spB2.y(), 2.) + pow(spB2.z(), 2.);
++                      seed2_sum += pow(spT2.y(), 2.) + pow(spT2.z(), 2.);
+ 
+                       return seed1_sum > seed2_sum;
+                   }
 diff --git a/device/stdpar/CMakeLists.txt b/device/stdpar/CMakeLists.txt
-index 5e2a15f..8d7fcd0 100644
+index 5e2a15f..8233ff1 100644
 --- a/device/stdpar/CMakeLists.txt
 +++ b/device/stdpar/CMakeLists.txt
-@@ -32,5 +32,18 @@ traccc_add_library( ${LIB} stdpar TYPE SHARED
+@@ -32,5 +32,21 @@ traccc_add_library( ${LIB} stdpar TYPE SHARED
  target_link_libraries( ${LIB}
    PUBLIC traccc::core)
  
@@ -74,8 +96,11 @@ index 5e2a15f..8d7fcd0 100644
 +  if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
 +    target_compile_options( ${LIB} PRIVATE
 +        ${TRACCC_STDPAR_BACKEND_FLAG}
-+        --stdpar-path=${TRACCC_STDPAR_PATH}
++        --hipstdpar-path=${TRACCC_STDPAR_PATH}
 +        --offload-arch=${TRACCC_STDPAR_TARGET})
++      if (NOT TRACCC_STDPAR_TARGET MATCHES "^gfx9")
++        target_compile_options( ${LIB} PRIVATE --hipstdpar-interpose-alloc)
++      endif ()
 +    target_link_options( ${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +  else ()
 +    target_compile_options(${LIB} PRIVATE -march=native -fopenmp-simd)
@@ -85,18 +110,6 @@ index 5e2a15f..8d7fcd0 100644
 +  target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +  target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +endif ()
-diff --git a/device/stdpar/include/traccc/stdpar/clusterization/clusterization_algorithm.hpp b/device/stdpar/include/traccc/stdpar/clusterization/clusterization_algorithm.hpp
-index 18e9ccd..fe33981 100644
---- a/device/stdpar/include/traccc/stdpar/clusterization/clusterization_algorithm.hpp
-+++ b/device/stdpar/include/traccc/stdpar/clusterization/clusterization_algorithm.hpp
-@@ -95,6 +95,7 @@ class clusterization_algorithm
-         /*
-          * Execute the CCA algorithm
-          */
-+        // TODO: this is currently broken with Clang Standard Parallel Algorithm Offload; investigate.
-         std::for_each_n(std::execution::par, counting_iterator(0), nbr_of_modules, [=](unsigned int i){
-           unsigned int num_clusters = 0;
- 
 diff --git a/device/stdpar/include/traccc/stdpar/clusterization/measurement_creation.hpp b/device/stdpar/include/traccc/stdpar/clusterization/measurement_creation.hpp
 index d0fd81c..d90fc27 100644
 --- a/device/stdpar/include/traccc/stdpar/clusterization/measurement_creation.hpp
@@ -148,10 +161,10 @@ index c5214d8..382b73a 100644
      /*
       * Seek the correct cell region in the input data. Again, this is all a
 diff --git a/examples/run/stdpar/CMakeLists.txt b/examples/run/stdpar/CMakeLists.txt
-index dde5fa3..99c31df 100644
+index dde5fa3..1442fc5 100644
 --- a/examples/run/stdpar/CMakeLists.txt
 +++ b/examples/run/stdpar/CMakeLists.txt
-@@ -12,13 +12,39 @@ traccc_add_executable( stdpar_sparseccl_example "stdpar_sparseccl.cpp"
+@@ -12,13 +12,45 @@ traccc_add_executable( stdpar_sparseccl_example "stdpar_sparseccl.cpp"
     traccc::options traccc::stdpar Boost::program_options)
  
  set (EXE_NAME "traccc_stdpar_sparseccl_example")
@@ -161,8 +174,11 @@ index dde5fa3..99c31df 100644
 +  if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
 +    target_compile_options( ${EXE_NAME} PRIVATE
 +        ${TRACCC_STDPAR_BACKEND_FLAG}
-+        --stdpar-path=${TRACCC_STDPAR_PATH}
++        --hipstdpar-path=${TRACCC_STDPAR_PATH}
 +        --offload-arch=${TRACCC_STDPAR_TARGET})
++    if (NOT TRACCC_STDPAR_TARGET MATCHES "^gfx9")
++        target_compile_options( ${EXE_NAME} PRIVATE --hipstdpar-interpose-alloc)
++    endif ()
 +    target_link_options( ${EXE_NAME} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +  else ()
 +    target_compile_options(${EXE_NAME} PRIVATE -march=native -fopenmp-simd)
@@ -184,8 +200,11 @@ index dde5fa3..99c31df 100644
 +  if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
 +    target_compile_options( ${EXE_NAME2} PRIVATE
 +        ${TRACCC_STDPAR_BACKEND_FLAG}
-+        --stdpar-path=${TRACCC_STDPAR_PATH}
++        --hipstdpar-path=${TRACCC_STDPAR_PATH}
 +        --offload-arch=${TRACCC_STDPAR_TARGET})
++    if (NOT TRACCC_STDPAR_TARGET MATCHES "^gfx9")
++        target_compile_options( ${EXE_NAME2} PRIVATE --hipstdpar-interpose-alloc)
++    endif ()
 +    target_link_options( ${EXE_NAME2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +  else ()
 +    target_compile_options(${EXE_NAME2} PRIVATE -march=native -fopenmp-simd)
@@ -196,21 +215,24 @@ index dde5fa3..99c31df 100644
 +  target_link_options(${EXE_NAME2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +endif ()
 diff --git a/tests/stdpar/CMakeLists.txt b/tests/stdpar/CMakeLists.txt
-index 166852c..164c74e 100644
+index 166852c..237ca76 100644
 --- a/tests/stdpar/CMakeLists.txt
 +++ b/tests/stdpar/CMakeLists.txt
-@@ -14,10 +14,35 @@ traccc_add_test( stdpar_sparseccl "test_cca_sparseccl.cpp"
+@@ -14,10 +14,41 @@ traccc_add_test( stdpar_sparseccl "test_cca_sparseccl.cpp"
                    traccc::core traccc::io traccc::stdpar)
  
  set (LIB "traccc_test_stdpar_fastsv")
 -target_compile_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 -target_link_options(${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +if (TRACCC_STDPAR_BACKEND MATCHES "clang")
-+  if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
++  if (DEFINED TRACCC_STDPAR_PATH)
 +    target_compile_options( ${LIB} PRIVATE
 +        ${TRACCC_STDPAR_BACKEND_FLAG}
-+        --stdpar-path=${TRACCC_STDPAR_PATH}
++        --hipstdpar-path=${TRACCC_STDPAR_PATH}
 +        --offload-arch=${TRACCC_STDPAR_TARGET})
++    if (NOT TRACCC_STDPAR_TARGET MATCHES "^gfx9")
++      target_compile_options( ${LIB} PRIVATE --hipstdpar-interpose-alloc)
++    endif ()
 +    target_link_options( ${LIB} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +  else ()
 +    target_compile_options(${LIB} PRIVATE -march=native -fopenmp-simd)
@@ -230,8 +252,11 @@ index 166852c..164c74e 100644
 +  if (DEFINED TRACCC_STDPAR_BACKEND_FLAG)
 +    target_compile_options( ${LIB2} PRIVATE
 +        ${TRACCC_STDPAR_BACKEND_FLAG}
-+        --stdpar-path=${TRACCC_STDPAR_PATH}
++        --hipstdpar-path=${TRACCC_STDPAR_PATH}
 +        --offload-arch=${TRACCC_STDPAR_TARGET})
++    if (NOT TRACCC_STDPAR_TARGET MATCHES "^gfx9")
++      target_compile_options( ${LIB2} PRIVATE --hipstdpar-interpose-alloc)
++    endif ()
 +    target_link_options( ${LIB2} PRIVATE ${TRACCC_STDPAR_BACKEND_FLAG})
 +  else ()
 +    target_compile_options(${LIB2} PRIVATE -march=native -fopenmp-simd)
