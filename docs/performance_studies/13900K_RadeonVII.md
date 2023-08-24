@@ -76,10 +76,32 @@ directly.
 | jacobi1 | 0.4         | 2           | 0.2                      |
 | jacobi2 | 0.3         | 4           | 0.07                     |
 
+## `cuda_stdpar`
+
+- [repo](https://github.com/quxflux/cuda_stdpar)
+- [patch](../../data/patches/cuda_stdpar/CUDA_STDPAR.patch)
+
+| Test            | A - CPU (MItems/s) | B - GPU (MItems/s) | B / A (higher is better) |
+|:---------------:|:------------------:|:------------------:|:------------------------:|
+| AoS - 9         | 21                 | 0.4                | 0.01                     |
+| AoS - 99        | 32                 | 4                  | 0.12                     |
+| AoS - 1000      | 67                 | 42                 | 0.62                     |
+| AoS - 9999      | 344                | 291                | 0.84                     |
+| AoS - 100000    | 186                | 827                | 6                        |
+| AoS - 999999    | 668                | 22859              | 34                       |
+| AoS - 9999999   | 697                | 44306              | 63                       |
+| SoA - 9         | 33                 | 0.1                | 0.003                    |
+| SoA - 99        | 43                 | 4                  | 0.09                     |
+| SoA - 1000      | 36                 | 43                 | 1.1                      |
+| SoA - 9999      | 31                 | 279                | 9                        |
+| SoA - 100000    | 31                 | 831                | 26                       |
+| SoA - 999999    | 31                 | 1037               | 33                       |
+| SoA - 9999999   | 31                 | 42992              | 1386                     |
+
 ## `cuda-stdpar-samples`
 
 - [repo](https://github.com/heidrifx/cuda-stdpar-samples)
-- [patch](../../data/patches/cuda-stdpar-samples/)
+- [patch](../../data/patches/cuda-stdpar-samples/CUDA_STDPAR_SAMPLES.patch)
 
 | Test                      | A - CPU (ms) | B - GPU (ms) | A / B (higher is better) |
 |:-------------------------:|:------------:|:------------:|:------------------------:|
