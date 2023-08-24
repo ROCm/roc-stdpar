@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..e69de29
 diff --git a/stdpar/build/Makefile-stdpar b/stdpar/build/Makefile-stdpar
 new file mode 100644
-index 0000000..6ea3973
+index 0000000..529f530
 --- /dev/null
 +++ b/stdpar/build/Makefile-stdpar
 @@ -0,0 +1,36 @@
@@ -24,8 +24,8 @@ index 0000000..6ea3973
 +	lulesh-init.cc
 +OBJECTS2.0 = $(SOURCES2.0:.cc=.o)
 +
-+CXXFLAGS = -O3 -stdpar --stdpar-path=${STDPAR_PATH} -std=c++17 -DUSE_MPI=0 --offload-arch=${STDPAR_TARGET}
-+LDFLAGS = -stdpar -ltbb
++CXXFLAGS = -O3 --hipstdpar --hipstdpar-path=${STDPAR_PATH} -std=c++17 -DUSE_MPI=0 --offload-arch=${STDPAR_TARGET}
++LDFLAGS = --hipstdpar -ltbb
 +
 +%.o: ../src/%.cc ../src/lulesh.h
 +	@echo "Building $<"
@@ -445,7 +445,7 @@ index 3928c2c..e613359 100644
        [=, &domain](Index_t i) {
          Index_t indx = regElemlist[i];
 diff --git a/stdpar/src/lulesh.h b/stdpar/src/lulesh.h
-index b13eedd..c4deac3 100644
+index b13eedd..71b2bdc 100644
 --- a/stdpar/src/lulesh.h
 +++ b/stdpar/src/lulesh.h
 @@ -44,7 +44,13 @@ inline real4  SQRT(real4  arg) { return sqrtf(arg) ; }
@@ -454,7 +454,7 @@ index b13eedd..c4deac3 100644
  
 -inline real4  CBRT(real4  arg) { return cbrtf(arg) ; }
 +inline real4  CBRT(real4  arg) {
-+  #ifdef __STDPAR__
++  #ifdef __HIPSTDPAR__
 +    return powf(arg, 1.f / 3.f); // Temporary workaround.
 +  #else
 +    return cbrtf(arg);

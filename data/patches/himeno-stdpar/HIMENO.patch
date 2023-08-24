@@ -1,5 +1,5 @@
 diff --git a/stdpar/himenoBMTxps.cpp b/stdpar/himenoBMTxps.cpp
-index 8a95e7d..c0c5dbb 100644
+index 8a95e7d..1e77079 100644
 --- a/stdpar/himenoBMTxps.cpp
 +++ b/stdpar/himenoBMTxps.cpp
 @@ -119,9 +119,11 @@ public:
@@ -15,13 +15,12 @@ index 8a95e7d..c0c5dbb 100644
  
        bool operator==(iterator other) const { return num == other.num; }
        bool operator!=(iterator other) const { return *this != other; }
-@@ -346,4 +348,9 @@ double second()
+@@ -346,4 +348,8 @@ double second()
  // nvc++ -O3 -std=c++17 -stdpar=gpu -DLARGE himenoBMTxps.cpp -o himenoBMTxps && ./himenoBMTxps
  // nvc++ -O3 -std=c++17 -stdpar=gpu -DMIDDLE himenoBMTxps.cpp -o himenoBMTxps && ./himenoBMTxps
  // nvc++ -O3 -std=c++17 -stdpar=gpu -DSMALL himenoBMTxps.cpp -o himenoBMTxps && ./himenoBMTxps
 +// OR
-+// clang++ -O3 -std=c++17 -stdpar --stdpar-path=PATH_TO_FORWARDING_HEADER_ROOT --offload-arch=YOUR_TARGET -DLARGE himenoBMTxps.cpp -o himenoBMTxps && ./himenoBMTxps
-+// clang++ -O3 -std=c++17 -stdpar --stdpar-path=PATH_TO_FORWARDING_HEADER_ROOT --offload-arch=YOUR_TARGET -DMIDDLE himenoBMTxps.cpp -o himenoBMTxps && ./himenoBMTxps
-+// clang++ -O3 -std=c++17 -stdpar --stdpar-path=PATH_TO_FORWARDING_HEADER_ROOT --offload-arch=YOUR_TARGET -DSMALL himenoBMTxps.cpp -o himenoBMTxps && ./himenoBMTxps
-+
++// clang++ -O3 -std=c++17 --hipstdpar --hipstdpar-path=PATH_TO_FORWARDING_HEADER_ROOT --offload-arch=YOUR_TARGET -DLARGE himenoBMTxps.cpp -o himenoBMTxps && ./himenoBMTxps
++// clang++ -O3 -std=c++17 --hipstdpar --hipstdpar-path=PATH_TO_FORWARDING_HEADER_ROOT --offload-arch=YOUR_TARGET -DMIDDLE himenoBMTxps.cpp -o himenoBMTxps && ./himenoBMTxps
++// clang++ -O3 -std=c++17 --hipstdpar --hipstdpar-path=PATH_TO_FORWARDING_HEADER_ROOT --offload-arch=YOUR_TARGET -DSMALL himenoBMTxps.cpp -o himenoBMTxps && ./himenoBMTxps
  

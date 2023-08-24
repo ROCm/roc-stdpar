@@ -1,17 +1,11 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index bbbae42..785adb9 100644
+index bbbae42..d814c6f 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -8,10 +8,33 @@ set_target_properties(cuda_stdpar PROPERTIES CXX_STANDARD 20
-                                              CXX_STANDARD_REQUIRED ON
-                                              CXX_EXTENSIONS OFF)
- 
--target_compile_options(cuda_stdpar PRIVATE 
-+target_compile_options(cuda_stdpar PRIVATE
+@@ -12,6 +12,29 @@ target_compile_options(cuda_stdpar PRIVATE
      $<$<CXX_COMPILER_ID:NVHPC>: -stdpar=gpu -Wextra $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>: -gpu=fastmath -O3>>
  )
  
--target_link_options(cuda_stdpar PRIVATE 
 +if (CMAKE_CXX_COMPILER_ID MATCHES Clang)
 +    if (NOT DEFINED STDPAR_PATH)
 +        message(
@@ -24,19 +18,19 @@ index bbbae42..785adb9 100644
 +    endif ()
 +endif ()
 +target_compile_options(cuda_stdpar PRIVATE
-+    $<$<CXX_COMPILER_ID:Clang>: -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -Wextra $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>: -ffast-math -O3>>
++    $<$<CXX_COMPILER_ID:Clang>: --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -Wextra $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>: -ffast-math -O3>>
 +)
 +if (NOT STDPAR_TARGET MATCHES "^gfx9")
 +    target_compile_options(cuda_stdpar PRIVATE
-+        $<$<CXX_COMPILER_ID:Clang>: --stdpar-interpose-alloc>
++        $<$<CXX_COMPILER_ID:Clang>: --hipstdpar-interpose-alloc>
 +    )
 +endif ()
 +
-+target_link_options(cuda_stdpar PRIVATE
+ target_link_options(cuda_stdpar PRIVATE
      $<$<CXX_COMPILER_ID:NVHPC>: -stdpar=gpu>
  )
 +target_link_options(cuda_stdpar PRIVATE
-+    $<$<CXX_COMPILER_ID:Clang>: -stdpar>
++    $<$<CXX_COMPILER_ID:Clang>: --hipstdpar>
 +)
 diff --git a/main.cpp b/main.cpp
 index 8298f27..fa83d70 100644
@@ -51,3 +45,17 @@ index 8298f27..fa83d70 100644
          reduced = std::transform_reduce(std::execution::par_unseq, std::begin(v), std::end(v), qf::point3d{},
                                          std::plus<>{}, [=](const auto i) {
                                            const auto x = data_x[i];
+diff --git a/point3d.h b/point3d.h
+index b591e21..63cf4b9 100644
+--- a/point3d.h
++++ b/point3d.h
+@@ -22,6 +22,9 @@ namespace quxflux
+   }
+ 
+   [[nodiscard]] point3d to_spherical(const point3d& cartesian) noexcept
++  #if defined(__HIPSTDPAR__)
++    __device__ // Temporary workaround
++  #endif
+   {
+     const auto [x, y, z] = cartesian;
+     const auto r = std::sqrt(x * x + y * y + z * z);

@@ -1,6 +1,6 @@
 diff --git a/compile_local_clang_stdpar.sh b/compile_local_clang_stdpar.sh
 new file mode 100755
-index 0000000..6c94974
+index 0000000..6aaae03
 --- /dev/null
 +++ b/compile_local_clang_stdpar.sh
 @@ -0,0 +1,16 @@
@@ -19,4 +19,4 @@ index 0000000..6c94974
 +find **/*.cpp -exec sh -c '${STDPAR_CXX} -march=native -O3 -std=c++17 -Wl,-ltbb {} -o bin/$(basename {} .cpp)_cpu' \;
 +
 +# compile offloaded STL
-+find **/*.cpp -exec sh -c '${STDPAR_CXX} -stdpar --stdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -O3 -std=c++17 {} -o bin/$(basename {} .cpp)' \;
++find **/*.cpp -exec sh -c '${STDPAR_CXX} --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -O3 -std=c++17 {} -o bin/$(basename {} .cpp)' \;

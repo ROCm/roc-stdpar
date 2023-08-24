@@ -1,6 +1,6 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 new file mode 100644
-index 0000000..24f69c8
+index 0000000..7368cca
 --- /dev/null
 +++ b/CMakeLists.txt
 @@ -0,0 +1,44 @@
@@ -23,13 +23,13 @@ index 0000000..24f69c8
 +endif ()
 +
 +set(OFFLOAD_COMPILE_FLAGS
-+    -stdpar
-+    --stdpar-path=${STDPAR_PATH}
++    --hipstdpar
++    --hipstdpar-path=${STDPAR_PATH}
 +    --offload-arch=${STDPAR_TARGET})
 +if (NOT STDPAR_TARGET MATCHES "^gfx9")
-+    list(APPEND OFFLOAD_COMPILE_FLAGS --stdpar-interpose-alloc)
++    list(APPEND OFFLOAD_COMPILE_FLAGS --hipstdpar-interpose-alloc)
 +endif ()
-+set(OFFLOAD_LINK_FLAGS -stdpar)
++set(OFFLOAD_LINK_FLAGS --hipstdpar)
 +set(OFFLOAD_LINK_LIBRARIES TBB::tbb)
 +
 +add_executable(

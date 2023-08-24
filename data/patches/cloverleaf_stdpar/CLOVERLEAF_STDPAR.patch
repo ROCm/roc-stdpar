@@ -1,12 +1,12 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index a295ace..8e25a7c 100644
+index a295ace..a180373 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -85,6 +85,23 @@ if (NVHPC_OFFLOAD)
              -Minfo=stdpar)
  endif ()
  
-+# Enable offloading support (via the non-standard `-stdpar`) for Clang/LLVM. The
++# Enable offloading support (via the non-standard `--hipstdpar`) for Clang/LLVM. The
 +# values are AMDGPU processors (https://www.llvm.org/docs/AMDGPUUsage.html#processors)
 +# which will be passed in via `--offload-arch=` argument.
 +# Example values are:
@@ -17,11 +17,11 @@ index a295ace..8e25a7c 100644
 +#   gfx1100 - Compile for RDNA3 NV31 GPUs
 +
 +if (CLANG_OFFLOAD)
-+    set(OFFLOAD_FLAGS -stdpar --stdpar-path=${CLANG_STDPAR_PATH} --offload-arch=${CLANG_OFFLOAD})
++    set(OFFLOAD_FLAGS --hipstdpar --hipstdpar-path=${CLANG_STDPAR_PATH} --offload-arch=${CLANG_OFFLOAD})
 +    if (NOT CLANG_OFFLOAD MATCHES "^gfx9")
-+        list(APPEND CLANG_FLAGS --stdpar-interpose-alloc)
++        list(APPEND OFFLOAD_FLAGS --hipstdpar-interpose-alloc)
 +    endif ()
-+    list(APPEND CMAKE_CXX_EXTRA_LINKERFLAGS -stdpar)
++    list(APPEND CMAKE_CXX_EXTRA_LINKERFLAGS --hipstdpar)
 +endif ()
  
  if (MPI_AS_LIBRARY)

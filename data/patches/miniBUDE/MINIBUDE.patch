@@ -12,7 +12,7 @@ index ddc6cde..21ddeac 100644
      stdDev = std::sqrt(variance);
    }
 diff --git a/src/std-indices/model.cmake b/src/std-indices/model.cmake
-index 40b62f3..6de8ae7 100644
+index 40b62f3..5d2a9c5 100644
 --- a/src/std-indices/model.cmake
 +++ b/src/std-indices/model.cmake
 @@ -19,6 +19,19 @@ register_flag_optional(NVHPC_OFFLOAD
@@ -20,7 +20,7 @@ index 40b62f3..6de8ae7 100644
          "")
  
 +register_flag_optional(CLANG_OFFLOAD
-+        "Enable offloading support (via the non-standard `-stdpar`) for
++        "Enable offloading support (via the non-standard `-hipstdpar`) for
 +         Clang/LLVM. The values are AMDGPU processors (https://www.llvm.org/docs/AMDGPUUsage.html#processors)
 +         which will be passed in via `--offload-arch=` argument.
 +
@@ -41,15 +41,57 @@ index 40b62f3..6de8ae7 100644
  
 +    if (CLANG_OFFLOAD)
 +        set(CLANG_FLAGS
-+                -stdpar
-+                --stdpar-path=${CLANG_STDPAR_PATH}
++                --hipstdpar
++                --hipstdpar-path=${CLANG_STDPAR_PATH}
 +                --offload-arch=${CLANG_OFFLOAD})
 +        if (NOT CLANG_OFFLOAD MATCHES "^gfx9")
-+                list(APPEND CLANG_FLAGS --stdpar-interpose-alloc)
++                list(APPEND CLANG_FLAGS --hipstdpar-interpose-alloc)
 +        endif ()
 +
 +        register_append_cxx_flags(ANY ${CLANG_FLAGS})
-+        register_append_link_flags(-stdpar)
++        register_append_link_flags(--hipstdpar)
++    endif ()
+ 
+ endmacro()
+diff --git a/src/std-ranges/model.cmake b/src/std-ranges/model.cmake
+index 764a392..796e4be 100644
+--- a/src/std-ranges/model.cmake
++++ b/src/std-ranges/model.cmake
+@@ -7,6 +7,19 @@ register_flag_optional(USE_TBB
+         "Link against an in-tree oneTBB via FetchContent_Declare, see top level CMakeLists.txt for details."
+         "OFF")
+ 
++register_flag_optional(CLANG_OFFLOAD
++        "Enable offloading support (via the non-standard `-hipstdpar`) for
++         Clang/LLVM. The values are AMDGPU processors (https://www.llvm.org/docs/AMDGPUUsage.html#processors)
++         which will be passed in via `--offload-arch=` argument.
++
++         Example values are:
++           gfx906  - Compile for Vega20 GPUs
++           gfx908  - Compile for CDNA1 GPUs
++           gfx90a  - Compile for CDNA2 GPUs
++           gfx1030 - Compile for RDNA2 NV21 GPUs
++           gfx1100 - Compile for RDNA3 NV31 GPUs"
++        "")
++
+ macro(setup)
+ 
+     # TODO this needs to eventually be removed when CMake adds proper C++20 support or at least update the flag used here
+@@ -24,5 +37,17 @@ macro(setup)
+         register_link_library(TBB::tbb)
+     endif ()
+ 
++    if (CLANG_OFFLOAD)
++        set(CLANG_FLAGS
++                --hipstdpar
++                --hipstdpar-path=${CLANG_STDPAR_PATH}
++                --offload-arch=${CLANG_OFFLOAD})
++        if (NOT CLANG_OFFLOAD MATCHES "^gfx9")
++                list(APPEND CLANG_FLAGS --hipstdpar-interpose-alloc)
++        endif ()
++
++        register_append_cxx_flags(ANY ${CLANG_FLAGS})
++        register_append_link_flags(--hipstdpar)
 +    endif ()
  
  endmacro()
