@@ -1,70 +1,72 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-new file mode 100644
-index 0000000..82854ba
---- /dev/null
+index d01dd79..913b94c 100644
+--- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -0,0 +1,42 @@
-+cmake_minimum_required(VERSION 3.14)
-+
-+project(nbody-stdpar LANGUAGES CXX)
-+
-+set(CMAKE_CXX_STANDARD 17)
-+set(CMAKE_CXX_STANDARD_REQUIRED ON)
-+set(CMAKE_CXX_EXTENSIONS OFF)
-+
-+find_package(TBB REQUIRED)
-+
-+if (USE_OFFLOAD)
-+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-+        set(
-+            CXX_FLAGS
-+                -stdpar
-+                --stdpar-path=${STDPAR_PATH}
-+                --offload-arch=${STDPAR_TARGET}
-+                -march=native)
-+        if (NOT STDPAR_TARGET MATCHES "^gfx9")
-+            list(APPEND CXX_FLAGS --stdpar-interpose-alloc)
-+        endif ()
-+        set(LD_FLAGS -stdpar)
-+        set(LD_LIBS TBB::tbb)
-+    elseif (CMAKE_CXX_COMPILER_ID MATCHES "NVHPC")
-+        set(CXX_FLAGS
-+                -stdpar
-+                -gpu=${STDPAR_TARGET}
-+                --restrict
-+                -Mllvm-fast
-+                -Ktrap=none
-+                -Minfo=accel
-+                -Minfo=stdpar)
-+    endif ()
-+else ()
-+    set(CXX_FLAGS -march=native -fopenmp-simd)
-+    set(LD_LIBRARIES TBB::tbb)
-+endif ()
-+
-+add_executable(${PROJECT_NAME} main.cc)
-+target_compile_options(${PROJECT_NAME} PRIVATE ${CXX_FLAGS})
-+target_link_options(${PROJECT_NAME} PRIVATE ${LD_FLAGS})
-+target_link_libraries(${PROJECT_NAME} PRIVATE ${LD_LIBRARIES})
+@@ -4,10 +4,14 @@ set(CMAKE_CXX_STANDARD 20)
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ 
+ set(DEVICE_CXX_FLAGS "")
+-if (ENABLE_NVIDIA_GPU)
++if (ENABLE_NVIDIA_GPU AND ENABLE_AMD_GPU)
++  message(FATAL_ERROR "ENABLE_NVIDIA_GPU and ENABLE_AMD_GPU are mutually exclusive.")
++elseif (ENABLE_NVIDIA_GPU)
+   enable_language(CUDA)
+   set(CMAKE_CXX_COMPILER "nvc++")
+   string(APPEND DEVICE_CXX_FLAGS " -stdpar=gpu -fast")
++elseif (ENABLE_AMD_GPU)
++  string(APPEND DEVICE_CXX_FLAGS " --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET}")
+ else()
+   set(CMAKE_CXX_COMPILER "g++")
+   string(APPEND DEVICE_CXX_FLAGS " -Ofast -march=native")
+@@ -41,6 +45,10 @@ if (ENABLE_NVIDIA_GPU)
+   add_compile_definitions (ENABLE_CUDA)
+   target_compile_options(grav PRIVATE -stdpar)
+   target_link_options(grav PRIVATE -stdpar)
++elseif (ENABLE_AMD_GPU)
++  add_compile_definitions (ENABLE_HIP)
++  target_compile_options(grav PRIVATE --hipstdpar)
++  target_link_options(grav PRIVATE --hipstdpar)
+ else()
+   find_package(TBB REQUIRED)
+   target_link_libraries(grav PRIVATE TBB::tbb)
+diff --git a/README.md b/README.md
+index a0494d1..4792fa5 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,8 @@ Simple Nbody gravitational simulator utilizing C++ Standard Parallelism.
+ Build this project by invoking the shell script in the top-level source directory:
+ sh build_nbody.sh
+ 
+-Toggle the ENABLE_NVIDIA_GPU option in the script to switch between building for CPU or GPU.
++Toggle the ENABLE_NVIDIA_GPU or ENABLE_AMD_GPU option in the script to switch between building for CPU or GPU.
++ENABLE_NVIDIA_GPU and ENABLE_AMD_GPU are mutually exclusive.
+ Setting ENABLE_NVIDIA_GPU:BOOL=ON requires a Nvidia GPU, CUDA, and the Nvidia HPC SDK.
+-Setting ENABLE_NVIDIA_GPU:BOOL=OFF requires the Intel TBB library to be available.
++Setting ENABLE_AMD_GPU:BOOL=ON requires an AMD GPU, ROCm and Clang/LLVM.
++Setting ENABLE_NVIDIA_GPU:BOOL=OFF and ENABLE_AMD_GPU:BOOL=OFF requires the Intel TBB library to be available.
 diff --git a/physics_impl.hh b/physics_impl.hh
-index 858e619..473aec1 100644
+index 694f54e..cb0cc2d 100644
 --- a/physics_impl.hh
 +++ b/physics_impl.hh
-@@ -16,7 +16,7 @@
- template <typename vecT>
- void accumulate_forces(System<vecT> &system, std::vector<vecT> &accel) {
-   using T = typename vecT::value_type;
--  const int sys_size{system.sysPos.size()};
-+  const int sys_size = system.sysPos.size();
+@@ -14,6 +14,8 @@ inline T inv_sqrt(const T x)
+ {
+ #ifdef ENABLE_CUDA
+   return rsqrtf(x);
++#elif defined(ENABLE_HIP)
++  return T{1} / sqrtf(x);
+ #else
+   __m128 y = _mm_set_ss(x); y = _mm_rsqrt_ss(y); return _mm_cvtss_f32(y);
+ #endif
+diff --git a/system.hh b/system.hh
+index 4be37a7..b564030 100644
+--- a/system.hh
++++ b/system.hh
+@@ -4,7 +4,7 @@
+ #include <vector>
  
-   T const *mssptr = system.sysMss.data();
-   vecT const *posptr = system.sysPos.data();
-@@ -41,7 +41,7 @@ vecT acceleration(const vecT &pos1, const vecT &pos2, const T mass2) {
-   vecT rel_dist = pos2 - pos1; // relative distance
-   T rd_sq{0.00001};            // rel_dist^2, initialize with softening length
-   rd_sq += dot_product(rel_dist);
--  const T rd_mag = rsqrtf(rd_sq); // 1 / (rel_dist dot rel_dist)^(1/2)
-+  const T rd_mag = T{1} / sqrtf(rd_sq); // 1 / (rel_dist dot rel_dist)^(1/2)
-   const T impulse = mass2 * rd_mag * rd_mag * rd_mag; // m_j / |rel_dist|^3
-   rel_dist *= impulse;                                // acceleration vector
-   return rel_dist;
+ struct Config {
+-#ifdef ENABLE_CUDA
++#if defined(ENABLE_CUDA) || defined(ENABLE_HIP)
+   int device{1};
+ #else
+   int device{2};
