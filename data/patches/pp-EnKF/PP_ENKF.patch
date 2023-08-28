@@ -1,0 +1,431 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ebb51ee..67bdca3 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -32,7 +32,7 @@ add_subdirectory(lib)
+ add_subdirectory(ext_lib/json)
+ add_subdirectory(ext_lib/mdspan)
+ 
+-if(BACKEND STREQUAL "OPENMP")
++if(BACKEND STREQUAL "OPENMP" OR BACKEND STREQUAL "CLANG")
+     add_subdirectory(ext_lib/eigen)
+ endif()
+ 
+@@ -48,7 +48,7 @@ if(BUILD_TESTING)
+ endif()
+ 
+ # Tutorial
+-if(NOT BACKEND STREQUAL "HIP")
++if(NOT BACKEND STREQUAL "HIP" AND NOT BACKEND STREQUAL "CLANG")
+     add_subdirectory(tutorial)
+ endif()
+ 
+diff --git a/lib/FFT.hpp b/lib/FFT.hpp
+index 758d5fe..a20510c 100644
+--- a/lib/FFT.hpp
++++ b/lib/FFT.hpp
+@@ -5,7 +5,7 @@
+   #include "OpenMP_FFT.hpp"
+ #elif defined(_NVHPC_CUDA) || defined(__CUDACC__)
+   #include "Cuda_FFT.hpp"
+-#elif defined(__HIPCC__)
++#elif defined(__HIPCC__) && !defined(__HIPSTDPAR__)
+   #include "HIP_FFT.hpp"
+ #else
+   #include "OpenMP_FFT.hpp"
+diff --git a/lib/Iteration.hpp b/lib/Iteration.hpp
+index 11ff7d8..5e3d9ff 100644
+--- a/lib/Iteration.hpp
++++ b/lib/Iteration.hpp
+@@ -7,7 +7,7 @@
+ #include <array>
+ 
+ template <size_t ND>
+-using shape_nd = std::array<int, ND>;
++using shape_nd = std::array<std::size_t, ND>;
+ 
+ template <class LayoutPolicy, size_t ND, size_t SIMD_WIDTH=1>
+ class IteratePolicy {
+diff --git a/lib/Random.hpp b/lib/Random.hpp
+index ec2d936..0b3bc9f 100644
+--- a/lib/Random.hpp
++++ b/lib/Random.hpp
+@@ -5,7 +5,7 @@
+   #include "OpenMP_Random.hpp"
+ #elif defined(_NVHPC_CUDA) || defined(__CUDACC__)
+   #include "Cuda_Random.hpp"
+-#elif defined(__HIPCC__)
++#elif defined(__HIPCC__) && !defined(__HIPSTDPAR__)
+   #include "HIP_Random.hpp"
+ #else
+   #include "OpenMP_Random.hpp"
+diff --git a/lib/linalg.hpp b/lib/linalg.hpp
+index b196ec6..0d6b499 100644
+--- a/lib/linalg.hpp
++++ b/lib/linalg.hpp
+@@ -5,7 +5,7 @@
+   #include "openmp_linalg.hpp"
+ #elif defined(_NVHPC_CUDA) || defined(__CUDACC__)
+   #include "cuda_linalg.hpp"
+-#elif defined(__HIPCC__)
++#elif defined(__HIPCC__) && !defined(__HIPSTDPAR__)
+   #include "hip_linalg.hpp"
+ #else
+   #include "openmp_linalg.hpp"
+diff --git a/lib/stdpar/CMakeLists.txt b/lib/stdpar/CMakeLists.txt
+index 7e33d57..3c201f7 100644
+--- a/lib/stdpar/CMakeLists.txt
++++ b/lib/stdpar/CMakeLists.txt
+@@ -13,8 +13,14 @@ elseif(BACKEND STREQUAL "OPENMP")
+         # with NVHPC, Eigen warns a lot. Need to suppress warnings in order to perform build testing on github.
+         target_compile_options(math_lib INTERFACE --diag_suppress=subscript_out_of_range,integer_sign_change,incompatible_vectors_conversion,code_is_unreachable)
+     endif()
++elseif(BACKEND STREQUAL "CLANG")
++    find_package(FFTW REQUIRED COMPONENTS DOUBLE_LIB)
++    target_link_libraries(math_lib INTERFACE fftw3 eigen tbb)
++    target_compile_definitions(math_lib INTERFACE ENABLE_STDPAR)
++    target_compile_options(math_lib INTERFACE --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++    target_link_options(math_lib INTERFACE --hipstdpar)
+ else()
+-    message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
++    message(FATAL_ERROR "No parallel backend specified. One of CUDA, CLANG or OPENMP must be On.")
+ endif()
+ 
+ # Compiler versions
+diff --git a/lib/stdpar/Parallel_Reduce.hpp b/lib/stdpar/Parallel_Reduce.hpp
+index c9f3d96..0772ebf 100644
+--- a/lib/stdpar/Parallel_Reduce.hpp
++++ b/lib/stdpar/Parallel_Reduce.hpp
+@@ -18,7 +18,7 @@ namespace Impl {
+     OutputType init = result;
+ 
+     result = std::transform_reduce(std::execution::par_unseq,
+-                                   (std::views::iota(0).begin(), std::views::iota(0).begin()+n,
++                                   std::views::iota(0).begin(), std::views::iota(0).begin()+n,
+                                    init,
+                                    binary_op,
+                                    [=] (const int idx) {
+diff --git a/lib/stdpar/Transpose.hpp b/lib/stdpar/Transpose.hpp
+index ba06db0..73b1c8c 100644
+--- a/lib/stdpar/Transpose.hpp
++++ b/lib/stdpar/Transpose.hpp
+@@ -12,6 +12,8 @@
+   #include "../openmp_linalg.hpp"
+ #elif defined(_NVHPC_CUDA) || defined(__CUDACC__)
+   #include "../cuda_linalg.hpp"
++#elif defined(__HIPCC__) && !defined(__HIPSTDPAR__)
++  #include "../hip_linalg.hpp"
+ #else
+   #include "../openmp_linalg.hpp"
+ #endif
+diff --git a/lib/stdpar/View.hpp b/lib/stdpar/View.hpp
+index fbbe059..da6daa7 100644
+--- a/lib/stdpar/View.hpp
++++ b/lib/stdpar/View.hpp
+@@ -46,7 +46,7 @@ public:
+   template <typename... I,
+              std::enable_if_t<
+                std::is_integral_v<
+-                 std::tuple_element_t<0, std::tuple<I...>>
++                 std::tuple_element_t<0, std::tuple<I..., void>>
+                >, std::nullptr_t> = nullptr>
+   View(const std::string name, I... indices)
+     : name_(name), is_empty_(false), data_(nullptr), size_(0) {
+diff --git a/lib/utils/mpi_utils.hpp b/lib/utils/mpi_utils.hpp
+index 78b7a91..b3c9e9e 100644
+--- a/lib/utils/mpi_utils.hpp
++++ b/lib/utils/mpi_utils.hpp
+@@ -3,7 +3,7 @@
+ 
+ #include <mpi.h>
+ 
+-#if defined(_NVHPC_CUDA) || defined(__CUDACC__) || defined(__HIPCC__)
++#if defined(_NVHPC_CUDA) || defined(__CUDACC__) || (defined(__HIPCC__) && !defined(__HIPSTDPAR__))
+     #include <thrust/complex.h>
+     template <typename RealType> using Complex = thrust::complex<RealType>;
+ #else
+diff --git a/mini-apps/heat3d-mpi/stdpar/CMakeLists.txt b/mini-apps/heat3d-mpi/stdpar/CMakeLists.txt
+index 27f8296..6fc7716 100644
+--- a/mini-apps/heat3d-mpi/stdpar/CMakeLists.txt
++++ b/mini-apps/heat3d-mpi/stdpar/CMakeLists.txt
+@@ -7,8 +7,11 @@ if(BACKEND STREQUAL "CUDA")
+     target_link_options(heat3d-mpi-stdpar PUBLIC -stdpar=gpu)
+ elseif(BACKEND STREQUAL "OPENMP")
+     target_compile_options(heat3d-mpi-stdpar PUBLIC -stdpar=multicore)
++elseif(BACKEND STREQUAL "CLANG")
++    target_compile_options(heat3d-mpi-stdpar PUBLIC --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++    target_link_options(heat3d-mpi-stdpar PUBLIC --hipstdpar)
+ else()
+-    message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
++    message(FATAL_ERROR "No parallel backend specified. One of CUDA, CLANG or OPENMP must be On.")
+ endif()
+ 
+ target_link_libraries(heat3d-mpi-stdpar PUBLIC MPI::MPI_CXX math_lib)
+diff --git a/mini-apps/heat3d-mpi/stdpar/functors.hpp b/mini-apps/heat3d-mpi/stdpar/functors.hpp
+index 8a98d8c..0050009 100644
+--- a/mini-apps/heat3d-mpi/stdpar/functors.hpp
++++ b/mini-apps/heat3d-mpi/stdpar/functors.hpp
+@@ -24,6 +24,9 @@ public:
+                RealView3D& u)
+     : conf_(conf), x_(x), y_(y), z_(z), u_(u) {}
+ 
++  #if defined(__HIPSTDPAR__)
++    __device__ // Temporary workaround
++  #endif
+   void operator()(const std::size_t idx) const {
+     const int h = conf_.halo_width_;
+     const std::size_t ix  = idx % conf_.nx_;
+@@ -131,6 +134,9 @@ public:
+                               RealView3D& un)
+     : conf_(conf), time_(time), x_(x), y_(y), z_(z), un_(un) {}
+ 
++  #if defined(__HIPSTDPAR__)
++    __device__ // Temporary workaround
++  #endif
+   void operator()(const std::size_t idx) const {
+     const int h = conf_.halo_width_;
+     const std::size_t ix  = idx % conf_.nx_;
+diff --git a/mini-apps/heat3d-mpi/stdpar/heat3D.hpp b/mini-apps/heat3d-mpi/stdpar/heat3D.hpp
+index 3cb2826..bbe9889 100644
+--- a/mini-apps/heat3d-mpi/stdpar/heat3D.hpp
++++ b/mini-apps/heat3d-mpi/stdpar/heat3D.hpp
+@@ -208,6 +208,8 @@ static void report_performance(const Config& conf, double seconds) {
+ 
+   #if defined(ENABLE_OPENMP)
+     std::cout << "OpenMP backend" << std::endl;
++  #elif defined(__HIPSTDPAR__)
++    std::cout << "HIP STDPAR backend" << std::endl;
+   #else
+     std::cout << "CUDA backend" << std::endl;
+   #endif
+diff --git a/mini-apps/heat3d-mpi/types.hpp b/mini-apps/heat3d-mpi/types.hpp
+index 919a666..5cd7e8a 100644
+--- a/mini-apps/heat3d-mpi/types.hpp
++++ b/mini-apps/heat3d-mpi/types.hpp
+@@ -11,7 +11,7 @@ using shape_type = std::array<size_type, N>;
+ 
+ namespace stdex = std::experimental;
+ 
+-#if defined(_NVHPC_CUDA) || defined(__CUDACC__) || defined(__HIPCC__)
++#if defined(_NVHPC_CUDA) || defined(__CUDACC__) || (defined(__HIPCC__) && !defined(__HIPSTDPAR__))
+   using default_layout = stdex::layout_left;
+ #else
+   using default_layout = stdex::layout_left;
+diff --git a/mini-apps/heat3d/stdpar/CMakeLists.txt b/mini-apps/heat3d/stdpar/CMakeLists.txt
+index e41c9ce..4d530a7 100644
+--- a/mini-apps/heat3d/stdpar/CMakeLists.txt
++++ b/mini-apps/heat3d/stdpar/CMakeLists.txt
+@@ -6,8 +6,11 @@ if(BACKEND STREQUAL "CUDA")
+     target_link_options(heat3d-stdpar PUBLIC -stdpar=gpu)
+ elseif(BACKEND STREQUAL "OPENMP")
+     target_compile_options(heat3d-stdpar PUBLIC -stdpar=multicore -fast)
++elseif(BACKEND STREQUAL "CLANG")
++    target_compile_options(heat3d-stdpar PUBLIC --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=gfx906)
++    target_link_options(heat3d-stdpar PUBLIC --hipstdpar)
+ else()
+-    message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
++    message(FATAL_ERROR "No parallel backend specified. One of CUDA, CLANG or OPENMP must be On.")
+ endif()
+ 
+ target_link_libraries(heat3d-stdpar PUBLIC std::mdspan)
+diff --git a/mini-apps/heat3d/stdpar/heat3D.hpp b/mini-apps/heat3d/stdpar/heat3D.hpp
+index 71f9326..4b207b7 100644
+--- a/mini-apps/heat3d/stdpar/heat3D.hpp
++++ b/mini-apps/heat3d/stdpar/heat3D.hpp
+@@ -27,6 +27,9 @@ public:
+                RealView3D& u)
+     : conf_(conf), x_(x), y_(y), z_(z), u_(u) {}
+ 
++  #if defined(__HIPSTDPAR__)
++    __device__ // Temporary workaround
++  #endif
+   void operator()(const std::size_t idx) const {
+     const std::size_t ix  = idx % conf_.nx_;
+     const std::size_t iyz = idx / conf_.nx_;
+@@ -98,6 +101,9 @@ public:
+                               RealView3D& un)
+     : conf_(conf), time_(time), x_(x), y_(y), z_(z), un_(un) {}
+ 
++  #if defined(__HIPSTDPAR__)
++    __device__ // Temporary workaround
++  #endif
+   void operator()(const std::size_t idx) const {
+     const std::size_t ix  = idx % conf_.nx_;
+     const std::size_t iyz = idx / conf_.nx_;
+@@ -194,6 +200,8 @@ static void report_performance(const Config& conf, double seconds) {
+ 
+   #if defined(ENABLE_OPENMP)
+     std::cout << "OpenMP backend" << std::endl;
++  #elif defined(__HIPSTDPAR__)
++    std::cout << "HIP STDPAR backend" << std::endl;
+   #else
+     std::cout << "CUDA backend" << std::endl;
+   #endif
+diff --git a/mini-apps/heat3d/types.hpp b/mini-apps/heat3d/types.hpp
+index 919a666..5cd7e8a 100644
+--- a/mini-apps/heat3d/types.hpp
++++ b/mini-apps/heat3d/types.hpp
+@@ -11,7 +11,7 @@ using shape_type = std::array<size_type, N>;
+ 
+ namespace stdex = std::experimental;
+ 
+-#if defined(_NVHPC_CUDA) || defined(__CUDACC__) || defined(__HIPCC__)
++#if defined(_NVHPC_CUDA) || defined(__CUDACC__) || (defined(__HIPCC__) && !defined(__HIPSTDPAR__))
+   using default_layout = stdex::layout_left;
+ #else
+   using default_layout = stdex::layout_left;
+diff --git a/mini-apps/lbm2d-letkf/config.hpp b/mini-apps/lbm2d-letkf/config.hpp
+index c2d2724..78c9812 100644
+--- a/mini-apps/lbm2d-letkf/config.hpp
++++ b/mini-apps/lbm2d-letkf/config.hpp
+@@ -29,7 +29,7 @@ struct Physics {
+   double cs_ = 0.2; /// 0.1 -- 0.2 ??
+ 
+   // LBM array
+-  const int Q_ = 9;
++  const unsigned int Q_ = 9;
+ 
+   const int q_[2][9] = {
+     {-1,0,1,-1,0,1,-1,0,1},
+diff --git a/mini-apps/lbm2d-letkf/stdpar/CMakeLists.txt b/mini-apps/lbm2d-letkf/stdpar/CMakeLists.txt
+index 8d6ef7d..331f604 100644
+--- a/mini-apps/lbm2d-letkf/stdpar/CMakeLists.txt
++++ b/mini-apps/lbm2d-letkf/stdpar/CMakeLists.txt
+@@ -10,8 +10,11 @@ if(BACKEND STREQUAL "CUDA")
+ elseif(BACKEND STREQUAL "OPENMP")
+     target_compile_options(lbm2d-letkf-stdpar PUBLIC -stdpar=multicore)
+     target_compile_definitions(lbm2d-letkf-stdpar PUBLIC SIMD)
++elseif(BACKEND STREQUAL "CLANG")
++    target_compile_options(lbm2d-letkf-stdpar PUBLIC --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++    target_link_options(lbm2d-letkf-stdpar PUBLIC --hipstdpar)
+ else()
+-    message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
++    message(FATAL_ERROR "No parallel backend specified. One of CUDA, CLANG or OPENMP must be On.")
+ endif()
+ 
+ # Enable macro
+diff --git a/mini-apps/lbm2d-letkf/stdpar/letkf.hpp b/mini-apps/lbm2d-letkf/stdpar/letkf.hpp
+index 5e95c02..124d9be 100644
+--- a/mini-apps/lbm2d-letkf/stdpar/letkf.hpp
++++ b/mini-apps/lbm2d-letkf/stdpar/letkf.hpp
+@@ -25,9 +25,9 @@ private:
+ 
+   value_type d_local_;
+   int obs_offset_ = 0;
+-  int n_obs_local_;
+-  int n_obs_x_;
+-  int n_obs_;
++  unsigned int n_obs_local_;
++  unsigned int n_obs_x_;
++  unsigned int n_obs_;
+ 
+ public:
+   LETKF(Config& conf, IOConfig& io_conf)=delete;
+@@ -38,7 +38,7 @@ public:
+     setFileInfo();
+ 
+     auto [nx, ny] = conf_.settings_.n_;
+-    const int n_batch0 = nx * ny;
++    const auto n_batch0 = nx * ny;
+     const int n_stt = conf_.phys_.Q_; // lbm
+     constexpr int no_per_grid = 3; // rho, u, v
+ 
+@@ -156,8 +156,8 @@ private:
+     broadcast(v_obs);
+     timers[DA_Broadcast]->end();
+ 
+-    const int ny_local = ny/mpi_conf_.size();
+-    const int y_offset = ny_local * mpi_conf_.rank();
++    const auto ny_local = ny/mpi_conf_.size();
++    const auto y_offset = ny_local * mpi_conf_.rank();
+     auto _y_obs = Impl::reshape(y_obs, std::array<std::size_t, 3>({n_obs_x_*n_obs_x_, 3, nx*ny_local}));
+     Iterate_policy<4> yo_pack_policy4d({0, 0, 0, 0}, {n_obs_x_, n_obs_x_, nx, ny_local});
+ 
+@@ -188,7 +188,7 @@ private:
+             std::enable_if_t<ViewType::rank()==3, std::nullptr_t> = nullptr>
+   void all2all(const ViewType& a, ViewType& b) {
+     assert( a.extents() == b.extents() );
+-    MPI_Datatype mpi_datatype = Impl::getMPIDataType<ViewType::value_type>();
++    MPI_Datatype mpi_datatype = Impl::getMPIDataType<typename ViewType::value_type>();
+ 
+     const std::size_t size = a.extent(0) * a.extent(1);
+     MPI_Alltoall(a.data_handle(),
+@@ -202,7 +202,7 @@ private:
+ 
+   template <class ViewType>
+   void broadcast(ViewType& a) {
+-    MPI_Datatype mpi_datatype = Impl::getMPIDataType<ViewType::value_type>();
++    MPI_Datatype mpi_datatype = Impl::getMPIDataType<typename ViewType::value_type>();
+ 
+     const std::size_t size = a.size();
+     MPI_Bcast(a.data_handle(),
+diff --git a/mini-apps/lbm2d-letkf/stdpar/solver.hpp b/mini-apps/lbm2d-letkf/stdpar/solver.hpp
+index 160fc1a..e529733 100644
+--- a/mini-apps/lbm2d-letkf/stdpar/solver.hpp
++++ b/mini-apps/lbm2d-letkf/stdpar/solver.hpp
+@@ -194,8 +194,8 @@ private:
+ 
+     conf_.settings_.is_reference_ = (sim_type_ == "nature");
+ 
+-    auto nx = json_data["Settings"]["nx"].get<int>();
+-    auto ny = json_data["Settings"]["ny"].get<int>();
++    auto nx = json_data["Settings"]["nx"].get<unsigned int>();
++    auto ny = json_data["Settings"]["ny"].get<unsigned int>();
+     conf_.settings_.n_ = {nx, ny};
+ 
+     auto c  = conf_.phys_.u_ref_ / conf_.settings_.cfl_;
+diff --git a/mini-apps/lbm2d-letkf/stdpar/types.hpp b/mini-apps/lbm2d-letkf/stdpar/types.hpp
+index d729316..8034c6f 100644
+--- a/mini-apps/lbm2d-letkf/stdpar/types.hpp
++++ b/mini-apps/lbm2d-letkf/stdpar/types.hpp
+@@ -8,7 +8,7 @@
+ 
+ namespace stdex = std::experimental;
+ 
+-#if defined(_NVHPC_CUDA) || defined(__CUDACC__)
++#if defined(_NVHPC_CUDA) || defined(__CUDACC__) || (defined(__HIPCC__) && !defined(__HIPSTDPAR__))
+   #include <thrust/complex.h>
+   #define SIMD_LOOP
+   #define SIMD_WIDTH 1
+diff --git a/mini-apps/vlp4d/stdpar/CMakeLists.txt b/mini-apps/vlp4d/stdpar/CMakeLists.txt
+index bcb1f87..0328139 100644
+--- a/mini-apps/vlp4d/stdpar/CMakeLists.txt
++++ b/mini-apps/vlp4d/stdpar/CMakeLists.txt
+@@ -8,6 +8,11 @@ if(BACKEND STREQUAL "CUDA")
+ elseif(BACKEND STREQUAL "OPENMP")
+     target_compile_options(vlp4d-stdpar PUBLIC -stdpar=multicore)
+     target_compile_definitions(vlp4d-stdpar PUBLIC SIMD)
++elseif(BACKEND STREQUAL "CLANG")
++    find_package(OpenMP REQUIRED) # For FFT
++    target_compile_options(vlp4d-stdpar PUBLIC --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
++    target_link_options(vlp4d-stdpar PUBLIC --hipstdpar)
++    target_link_libraries(vlp4d-stdpar PUBLIC OpenMP::OpenMP_CXX)
+ else()
+     message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
+ endif()
+diff --git a/mini-apps/vlp4d/stdpar/diags.cpp b/mini-apps/vlp4d/stdpar/diags.cpp
+index 6d91926..dbb52f5 100644
+--- a/mini-apps/vlp4d/stdpar/diags.cpp
++++ b/mini-apps/vlp4d/stdpar/diags.cpp
+@@ -11,7 +11,7 @@ Diags::Diags(const Config& conf) {
+ 
+ void Diags::compute(const Config& conf, Efield* ef, int iter) {
+   const auto dom = conf.dom_;
+-  int nx = dom.nxmax_[0], ny = dom.nxmax_[1];
++  unsigned int nx = dom.nxmax_[0], ny = dom.nxmax_[1];
+ 
+   assert(iter >= 0 && iter <= dom.nbiter_);
+   auto ex  = ef->ex();
+diff --git a/mini-apps/vlp4d/stdpar/types.hpp b/mini-apps/vlp4d/stdpar/types.hpp
+index fbb417c..ea72432 100644
+--- a/mini-apps/vlp4d/stdpar/types.hpp
++++ b/mini-apps/vlp4d/stdpar/types.hpp
+@@ -8,7 +8,7 @@
+ 
+ namespace stdex = std::experimental;
+ 
+-#if defined(_NVHPC_CUDA) || defined(__CUDACC__)
++#if defined(_NVHPC_CUDA) || defined(__CUDACC__) || (defined(__HIPCC__) && !defined(__HIPSTDPAR__))
+   #include <thrust/complex.h>
+   #define SIMD_LOOP
+   #define SIMD_WIDTH 1

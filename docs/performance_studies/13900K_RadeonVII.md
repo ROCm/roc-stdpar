@@ -251,6 +251,29 @@ directly.
 | transform - 10^7 | 5            | 28           | 0.17                     |
 | transform - 10^8 | 53           | 89           | 0.5                      |
 
+## pp-EnKF
+
+- [repo](https://github.com/yasahi-hpc/pp-EnKF)
+- [patch](../../data/patches/pp-EnKF/PP_ENKF.patch)
+
+| Test                 | A - CPU (s) | B - GPU (s) | A / B (higher is better) |
+|:--------------------:|:-----------:|:-----------:|:------------------------:|
+| heat3d               | 147         | 11          | 13                       |
+| kbm2d-letkf nature   | 75          | 50          | 1.5                      |
+| kbm2d-letkf no_da    | 2           | 0.4         | 5                        |
+| kbm2d-letkf nudging  | 40          | 22          | 1.8                      |
+| vlp4d SLD10_large    | 273         | 240         | 1.1                      |
+
+- notes:
+  - CPU testing was done using GCC13.1
+  - for the CPU tests uses of `std::views::iota(n).begin()` are replaced with
+    equivalent uses of `thrust::counting_iterator`; this is because the former's
+    iterator type models `std::random_access_iterator` without nesting the
+    associated iterator_category tag, which is required for parallelisation and
+    vectorisation with the current implementation of the standard library
+  - GPU testing fully re-uses the OpenMP path i.e. no specialised HIP libraries
+    are used
+
 ## STLBM - Lattice Boltzmann simulation framework based on C++ Parallel Algorithms
 
 - [repo](https://gitlab.com/unigehpfs/stlbm)
