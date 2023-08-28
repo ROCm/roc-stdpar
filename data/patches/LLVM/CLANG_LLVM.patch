@@ -426,10 +426,10 @@ index 102209ce899d..2e861cd56048 100644
  
  LANGOPT(SizedDeallocation , 1, 0, "sized deallocation")
 diff --git a/clang/include/clang/Driver/Options.td b/clang/include/clang/Driver/Options.td
-index 619c418365c2..9b39d89e78ed 100644
+index da2dc934e37c..15e1f9167f5a 100644
 --- a/clang/include/clang/Driver/Options.td
 +++ b/clang/include/clang/Driver/Options.td
-@@ -1261,6 +1261,32 @@ def rocm_path_EQ : Joined<["--"], "rocm-path=">, Group<hip_Group>,
+@@ -1262,6 +1262,32 @@ def rocm_path_EQ : Joined<["--"], "rocm-path=">, Group<hip_Group>,
    HelpText<"ROCm installation path, used for finding and automatically linking required bitcode libraries.">;
  def hip_path_EQ : Joined<["--"], "hip-path=">, Group<hip_Group>,
    HelpText<"HIP runtime installation path, used for finding HIP version and adding HIP include path.">;
@@ -463,7 +463,7 @@ index 619c418365c2..9b39d89e78ed 100644
    HelpText<"ROCm device library path. Alternative to rocm-path.">;
  def : Joined<["--"], "hip-device-lib-path=">, Alias<rocm_device_lib_path_EQ>;
 diff --git a/clang/lib/AST/ExprConstant.cpp b/clang/lib/AST/ExprConstant.cpp
-index 9f4c758b8130..d2df60a2f74f 100644
+index 630fb02d0531..3297316d7f05 100644
 --- a/clang/lib/AST/ExprConstant.cpp
 +++ b/clang/lib/AST/ExprConstant.cpp
 @@ -3378,7 +3378,7 @@ static bool evaluateVarDeclInit(EvalInfo &Info, const Expr *E,
@@ -499,7 +499,7 @@ index 3e8b2b78a392..3f2e9da57d6d 100644
    {
      PrettyStackTraceString CrashInfo("Optimizer");
 diff --git a/clang/lib/CodeGen/CGBuiltin.cpp b/clang/lib/CodeGen/CGBuiltin.cpp
-index d35c4766243c..db7436e7c80a 100644
+index 070246f099e2..54f1108e044b 100644
 --- a/clang/lib/CodeGen/CGBuiltin.cpp
 +++ b/clang/lib/CodeGen/CGBuiltin.cpp
 @@ -2279,6 +2279,19 @@ static Value *tryUseTestFPKind(CodeGenFunction &CGF, unsigned BuiltinID,
@@ -551,45 +551,11 @@ index d35c4766243c..db7436e7c80a 100644
    switch (Arch) {
    case llvm::Triple::arm:
    case llvm::Triple::armeb:
-diff --git a/clang/lib/CodeGen/CGExprCXX.cpp b/clang/lib/CodeGen/CGExprCXX.cpp
-index 4d3f3e9603d9..34d4f37a5d29 100644
---- a/clang/lib/CodeGen/CGExprCXX.cpp
-+++ b/clang/lib/CodeGen/CGExprCXX.cpp
-@@ -2195,11 +2195,19 @@ static llvm::Value *EmitTypeidFromVTable(CodeGenFunction &CGF, const Expr *E,
- 
- llvm::Value *CodeGenFunction::EmitCXXTypeidExpr(const CXXTypeidExpr *E) {
-   llvm::Type *PtrTy = llvm::PointerType::getUnqual(getLLVMContext());
-+  LangAS GlobAS = CGM.GetGlobalVarAddressSpace(nullptr);
-+
-+  auto MaybeASCast = [=](auto &&TypeInfo) {
-+    if (GlobAS == LangAS::Default)
-+      return TypeInfo;
-+    return getTargetHooks().performAddrSpaceCast(CGM,TypeInfo, GlobAS,
-+                                                 LangAS::Default, PtrTy);
-+  };
- 
-   if (E->isTypeOperand()) {
-     llvm::Constant *TypeInfo =
-         CGM.GetAddrOfRTTIDescriptor(E->getTypeOperand(getContext()));
--    return TypeInfo;
-+    return MaybeASCast(TypeInfo);
-   }
- 
-   // C++ [expr.typeid]p2:
-@@ -2212,7 +2220,7 @@ llvm::Value *CodeGenFunction::EmitCXXTypeidExpr(const CXXTypeidExpr *E) {
-     return EmitTypeidFromVTable(*this, E->getExprOperand(), PtrTy);
- 
-   QualType OperandTy = E->getExprOperand()->getType();
--  return CGM.GetAddrOfRTTIDescriptor(OperandTy);
-+  return MaybeASCast(CGM.GetAddrOfRTTIDescriptor(OperandTy));
- }
- 
- static llvm::Value *EmitDynamicCastToNull(CodeGenFunction &CGF,
 diff --git a/clang/lib/CodeGen/CGStmt.cpp b/clang/lib/CodeGen/CGStmt.cpp
-index 2184b8600d76..b2542fecf48b 100644
+index 6674aa2409a5..5c7ad96dd09c 100644
 --- a/clang/lib/CodeGen/CGStmt.cpp
 +++ b/clang/lib/CodeGen/CGStmt.cpp
-@@ -2418,6 +2418,24 @@ EmitAsmStores(CodeGenFunction &CGF, const AsmStmt &S,
+@@ -2420,6 +2420,24 @@ EmitAsmStores(CodeGenFunction &CGF, const AsmStmt &S,
    }
  }
  
@@ -614,7 +580,7 @@ index 2184b8600d76..b2542fecf48b 100644
  void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
    // Pop all cleanup blocks at the end of the asm statement.
    CodeGenFunction::RunCleanupsScope Cleanups(*this);
-@@ -2429,27 +2447,38 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
+@@ -2431,27 +2449,38 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
    SmallVector<TargetInfo::ConstraintInfo, 4> OutputConstraintInfos;
    SmallVector<TargetInfo::ConstraintInfo, 4> InputConstraintInfos;
  
@@ -658,7 +624,7 @@ index 2184b8600d76..b2542fecf48b 100644
  
    std::vector<LValue> ResultRegDests;
 diff --git a/clang/lib/CodeGen/CodeGenFunction.cpp b/clang/lib/CodeGen/CodeGenFunction.cpp
-index 89138ddbdc0b..b8d9adc07fb2 100644
+index bf83171e2c68..3a5f5add0947 100644
 --- a/clang/lib/CodeGen/CodeGenFunction.cpp
 +++ b/clang/lib/CodeGen/CodeGenFunction.cpp
 @@ -2594,10 +2594,15 @@ void CodeGenFunction::checkTargetFeatures(SourceLocation Loc,
@@ -703,7 +669,7 @@ index 89138ddbdc0b..b8d9adc07fb2 100644
    }
  }
 diff --git a/clang/lib/CodeGen/CodeGenModule.cpp b/clang/lib/CodeGen/CodeGenModule.cpp
-index 440fb040a43c..d002d94a5fbf 100644
+index 9b241165b7c5..c6d4a3441721 100644
 --- a/clang/lib/CodeGen/CodeGenModule.cpp
 +++ b/clang/lib/CodeGen/CodeGenModule.cpp
 @@ -3558,7 +3558,10 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
@@ -719,10 +685,10 @@ index 440fb040a43c..d002d94a5fbf 100644
      } else {
        // We need to emit host-side 'shadows' for all global
 diff --git a/clang/lib/Driver/Driver.cpp b/clang/lib/Driver/Driver.cpp
-index 1cdd7ec42d8c..ebd74111599f 100644
+index 7b64ef4cc5db..4c3f9c9cadba 100644
 --- a/clang/lib/Driver/Driver.cpp
 +++ b/clang/lib/Driver/Driver.cpp
-@@ -773,7 +773,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
+@@ -768,7 +768,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                     [](std::pair<types::ID, const llvm::opt::Arg *> &I) {
                       return types::isHIP(I.first);
                     }) ||
@@ -732,7 +698,7 @@ index 1cdd7ec42d8c..ebd74111599f 100644
    if (IsCuda && IsHIP) {
      Diag(clang::diag::err_drv_mix_cuda_hip);
      return;
-@@ -2718,6 +2719,10 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
+@@ -2713,6 +2714,10 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
          }
        }
  
@@ -743,7 +709,7 @@ index 1cdd7ec42d8c..ebd74111599f 100644
        if (DiagnoseInputExistence(Args, Value, Ty, /*TypoCorrect=*/true))
          Inputs.push_back(std::make_pair(Ty, A));
  
-@@ -3928,6 +3933,11 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
+@@ -3923,6 +3928,11 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
    phases::ID FinalPhase = getFinalPhase(Args, &FinalPhaseArg);
  
    if (FinalPhase == phases::Link) {
@@ -756,7 +722,7 @@ index 1cdd7ec42d8c..ebd74111599f 100644
      if (Args.hasArg(options::OPT_emit_llvm) && !Args.hasArg(options::OPT_hip_link))
        Diag(clang::diag::err_drv_emit_llvm_link);
 diff --git a/clang/lib/Driver/ToolChains/AMDGPU.cpp b/clang/lib/Driver/ToolChains/AMDGPU.cpp
-index d0223322b56b..0fcdd9e1fb87 100644
+index 3f08c0ef5d6f..04d9f9218879 100644
 --- a/clang/lib/Driver/ToolChains/AMDGPU.cpp
 +++ b/clang/lib/Driver/ToolChains/AMDGPU.cpp
 @@ -329,6 +329,20 @@ RocmInstallationDetector::RocmInstallationDetector(
@@ -845,10 +811,10 @@ index d0223322b56b..0fcdd9e1fb87 100644
  
  void amdgpu::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 diff --git a/clang/lib/Driver/ToolChains/Clang.cpp b/clang/lib/Driver/ToolChains/Clang.cpp
-index 39bc21b9678b..e88a3dfac350 100644
+index aaed70a1461e..a1b96b1aebb5 100644
 --- a/clang/lib/Driver/ToolChains/Clang.cpp
 +++ b/clang/lib/Driver/ToolChains/Clang.cpp
-@@ -6552,6 +6552,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
+@@ -6551,6 +6551,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
      if (Args.hasFlag(options::OPT_fgpu_allow_device_init,
                       options::OPT_fno_gpu_allow_device_init, false))
        CmdArgs.push_back("-fgpu-allow-device-init");
@@ -964,10 +930,10 @@ index cfea6493ced7..d97fd54700b4 100644
                            diag::err_capture_bad_target, Callee, *this)
          << Capture.getVariable();
 diff --git a/clang/lib/Sema/SemaExpr.cpp b/clang/lib/Sema/SemaExpr.cpp
-index 34284a8d9381..3d135427a3d5 100644
+index f9badf4ede84..0d939b3eeb3d 100644
 --- a/clang/lib/Sema/SemaExpr.cpp
 +++ b/clang/lib/Sema/SemaExpr.cpp
-@@ -19109,7 +19109,7 @@ MarkVarDeclODRUsed(ValueDecl *V, SourceLocation Loc, Sema &SemaRef,
+@@ -19111,7 +19111,7 @@ MarkVarDeclODRUsed(ValueDecl *V, SourceLocation Loc, Sema &SemaRef,
        // Diagnose ODR-use of host global variables in device functions.
        // Reference of device global variables in host functions is allowed
        // through shadow variables therefore it is not diagnosed.
