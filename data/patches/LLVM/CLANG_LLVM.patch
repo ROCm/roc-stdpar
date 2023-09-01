@@ -5,7 +5,7 @@ index 8b4649733a9c..0476dbc153a9 100644
 @@ -176,3 +176,388 @@ Predefined Macros
     * - ``HIP_API_PER_THREAD_DEFAULT_STREAM``
       - Alias to ``__HIP_API_PER_THREAD_DEFAULT_STREAM__``. Deprecated.
- 
+
 +
 +C++ Standard Parallelism Offload Support: Compiler And Runtime
 +==============================================================
@@ -39,7 +39,7 @@ index 8b4649733a9c..0476dbc153a9 100644
 +- **What**: standard library algorithms, when invoked with the
 +  ``parallel_unsequenced_policy``
 +- **Why**: democratise accelerator programming, without loss of user familiarity
-+- **Where**: any and all accelerators that can be targeted by Clang/LLVM via HIP
++- **Where**: only AMDGPU accelerators targeted by Clang/LLVM via HIP
 +
 +Small Example
 +=============
@@ -409,7 +409,7 @@ index 73264181ca1c..3a2aebc62304 100644
 +def err_drv_no_hipstdpar_prim_lib : Error<
 +  "cannot find rocPrim, which is required by the HIP Standard Parallelism "
 +  "Acceleration library; provide it via '--hipstdpar-prim-path'">;
- 
+
  def err_drv_no_hipspv_device_lib : Error<
    "cannot find HIP device library%select{| for %1}0; provide its path via "
 diff --git a/clang/include/clang/Basic/LangOptions.def b/clang/include/clang/Basic/LangOptions.def
@@ -418,18 +418,18 @@ index 102209ce899d..2e861cd56048 100644
 +++ b/clang/include/clang/Basic/LangOptions.def
 @@ -278,6 +278,8 @@ LANGOPT(SYCLIsHost        , 1, 0, "SYCL host compilation")
  ENUM_LANGOPT(SYCLVersion  , SYCLMajorVersion, 2, SYCL_None, "Version of the SYCL standard used")
- 
+
  LANGOPT(HIPUseNewLaunchAPI, 1, 0, "Use new kernel launching API for HIP")
 +LANGOPT(HIPStdPar, 1, 0, "Enable Standard Parallel Algorithm Acceleration for HIP (experimental)")
 +LANGOPT(HIPStdParInterposeAlloc, 1, 0, "Replace allocations / deallocations with HIP RT calls when Standard Parallel Algorithm Acceleration for HIP is enabled (Experimental)")
  LANGOPT(OffloadUniformBlock, 1, 0, "Assume that kernels are launched with uniform block sizes (default true for CUDA/HIP and false otherwise)")
- 
+
  LANGOPT(SizedDeallocation , 1, 0, "sized deallocation")
 diff --git a/clang/include/clang/Driver/Options.td b/clang/include/clang/Driver/Options.td
-index da2dc934e37c..15e1f9167f5a 100644
+index 3d73e24a4dc5..0176b33e4c4f 100644
 --- a/clang/include/clang/Driver/Options.td
 +++ b/clang/include/clang/Driver/Options.td
-@@ -1262,6 +1262,32 @@ def rocm_path_EQ : Joined<["--"], "rocm-path=">, Group<hip_Group>,
+@@ -1264,6 +1264,32 @@ def rocm_path_EQ : Joined<["--"], "rocm-path=">, Group<hip_Group>,
    HelpText<"ROCm installation path, used for finding and automatically linking required bitcode libraries.">;
  def hip_path_EQ : Joined<["--"], "hip-path=">, Group<hip_Group>,
    HelpText<"HIP runtime installation path, used for finding HIP version and adding HIP include path.">;
@@ -476,7 +476,7 @@ index 630fb02d0531..3297316d7f05 100644
        Info.FFDiag(E, Info.getLangOpts().CPlusPlus11
                           ? diag::note_constexpr_ltor_non_constexpr
 diff --git a/clang/lib/CodeGen/BackendUtil.cpp b/clang/lib/CodeGen/BackendUtil.cpp
-index 3e8b2b78a392..3f2e9da57d6d 100644
+index 79b23a850409..80830fb65753 100644
 --- a/clang/lib/CodeGen/BackendUtil.cpp
 +++ b/clang/lib/CodeGen/BackendUtil.cpp
 @@ -55,6 +55,7 @@
@@ -490,7 +490,7 @@ index 3e8b2b78a392..3f2e9da57d6d 100644
 @@ -1094,6 +1095,10 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
        TheModule->addModuleFlag(Module::Error, "UnifiedLTO", uint32_t(1));
    }
- 
+
 +  if (LangOpts.HIPStdPar && !LangOpts.CUDAIsDevice &&
 +      LangOpts.HIPStdParInterposeAlloc)
 +    MPM.addPass(HipStdParAllocationInterpositionPass());
@@ -499,13 +499,13 @@ index 3e8b2b78a392..3f2e9da57d6d 100644
    {
      PrettyStackTraceString CrashInfo("Optimizer");
 diff --git a/clang/lib/CodeGen/CGBuiltin.cpp b/clang/lib/CodeGen/CGBuiltin.cpp
-index 070246f099e2..54f1108e044b 100644
+index a513eae46e35..6461af2a2abb 100644
 --- a/clang/lib/CodeGen/CGBuiltin.cpp
 +++ b/clang/lib/CodeGen/CGBuiltin.cpp
-@@ -2279,6 +2279,19 @@ static Value *tryUseTestFPKind(CodeGenFunction &CGF, unsigned BuiltinID,
+@@ -2280,6 +2280,19 @@ static Value *tryUseTestFPKind(CodeGenFunction &CGF, unsigned BuiltinID,
    return nullptr;
  }
- 
+
 +static RValue EmitHipStdParUnsupportedBuiltin(CodeGenFunction *CGF,
 +                                           const FunctionDecl *FD) {
 +  auto Name = FD->getNameAsString() + "__hipstdpar_unsupported";
@@ -522,19 +522,19 @@ index 070246f099e2..54f1108e044b 100644
  RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
                                          const CallExpr *E,
                                          ReturnValueSlot ReturnValue) {
-@@ -5602,7 +5615,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
+@@ -5603,7 +5616,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
      llvm_unreachable("Bad evaluation kind in EmitBuiltinExpr");
    }
- 
+
 -  ErrorUnsupported(E, "builtin function");
 +  if (getLangOpts().HIPStdPar && getLangOpts().CUDAIsDevice)
 +    return EmitHipStdParUnsupportedBuiltin(this, FD);
 +  else
 +    ErrorUnsupported(E, "builtin function");
- 
+
    // Unknown builtin, for now just dump it out and return undef.
    return GetUndefRValue(E->getType());
-@@ -5612,6 +5628,16 @@ static Value *EmitTargetArchBuiltinExpr(CodeGenFunction *CGF,
+@@ -5613,6 +5629,16 @@ static Value *EmitTargetArchBuiltinExpr(CodeGenFunction *CGF,
                                          unsigned BuiltinID, const CallExpr *E,
                                          ReturnValueSlot ReturnValue,
                                          llvm::Triple::ArchType Arch) {
@@ -558,7 +558,7 @@ index 6674aa2409a5..5c7ad96dd09c 100644
 @@ -2420,6 +2420,24 @@ EmitAsmStores(CodeGenFunction &CGF, const AsmStmt &S,
    }
  }
- 
+
 +static void EmitHipStdParUnsupportedAsm(CodeGenFunction *CGF,
 +                                        const AsmStmt &S) {
 +  constexpr auto Name = "__ASM__hipstdpar_unsupported";
@@ -583,7 +583,7 @@ index 6674aa2409a5..5c7ad96dd09c 100644
 @@ -2431,27 +2449,38 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
    SmallVector<TargetInfo::ConstraintInfo, 4> OutputConstraintInfos;
    SmallVector<TargetInfo::ConstraintInfo, 4> InputConstraintInfos;
- 
+
 -  for (unsigned i = 0, e = S.getNumOutputs(); i != e; i++) {
 +  bool IsHipStdPar = getLangOpts().HIPStdPar && getLangOpts().CUDAIsDevice;
 +  bool IsValidTargetASM = true;
@@ -600,7 +600,7 @@ index 6674aa2409a5..5c7ad96dd09c 100644
 +      assert(IsValid && "Failed to parse output constraint");
      OutputConstraintInfos.push_back(Info);
    }
- 
+
 -  for (unsigned i = 0, e = S.getNumInputs(); i != e; i++) {
 +  for (unsigned i = 0, e = S.getNumInputs(); i != e && IsValidTargetASM; i++) {
      StringRef Name;
@@ -616,12 +616,12 @@ index 6674aa2409a5..5c7ad96dd09c 100644
 +      assert(IsValid && "Failed to parse input constraint"); (void)IsValid;
      InputConstraintInfos.push_back(Info);
    }
- 
+
 +  if (!IsValidTargetASM)
 +    return EmitHipStdParUnsupportedAsm(this, S);
 +
    std::string Constraints;
- 
+
    std::vector<LValue> ResultRegDests;
 diff --git a/clang/lib/CodeGen/CodeGenFunction.cpp b/clang/lib/CodeGen/CodeGenFunction.cpp
 index bf83171e2c68..3a5f5add0947 100644
@@ -669,10 +669,10 @@ index bf83171e2c68..3a5f5add0947 100644
    }
  }
 diff --git a/clang/lib/CodeGen/CodeGenModule.cpp b/clang/lib/CodeGen/CodeGenModule.cpp
-index 9b241165b7c5..c6d4a3441721 100644
+index 07bce12d7e66..d5b9f743be69 100644
 --- a/clang/lib/CodeGen/CodeGenModule.cpp
 +++ b/clang/lib/CodeGen/CodeGenModule.cpp
-@@ -3558,7 +3558,10 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
+@@ -3559,7 +3559,10 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
            !Global->hasAttr<CUDAConstantAttr>() &&
            !Global->hasAttr<CUDASharedAttr>() &&
            !Global->getType()->isCUDADeviceBuiltinSurfaceType() &&
@@ -685,10 +685,10 @@ index 9b241165b7c5..c6d4a3441721 100644
      } else {
        // We need to emit host-side 'shadows' for all global
 diff --git a/clang/lib/Driver/Driver.cpp b/clang/lib/Driver/Driver.cpp
-index 7b64ef4cc5db..4c3f9c9cadba 100644
+index 9d05549f671e..23d4258bfe09 100644
 --- a/clang/lib/Driver/Driver.cpp
 +++ b/clang/lib/Driver/Driver.cpp
-@@ -768,7 +768,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
+@@ -767,7 +767,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                     [](std::pair<types::ID, const llvm::opt::Arg *> &I) {
                       return types::isHIP(I.first);
                     }) ||
@@ -698,20 +698,20 @@ index 7b64ef4cc5db..4c3f9c9cadba 100644
    if (IsCuda && IsHIP) {
      Diag(clang::diag::err_drv_mix_cuda_hip);
      return;
-@@ -2713,6 +2714,10 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
+@@ -2705,6 +2706,10 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
          }
        }
- 
+
 +      if ((Ty == types::TY_C || Ty == types::TY_CXX) &&
 +          Args.hasArgNoClaim(options::OPT_hipstdpar))
 +        Ty = types::TY_HIP;
 +
        if (DiagnoseInputExistence(Args, Value, Ty, /*TypoCorrect=*/true))
          Inputs.push_back(std::make_pair(Ty, A));
- 
-@@ -3923,6 +3928,11 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
+
+@@ -3915,6 +3920,11 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
    phases::ID FinalPhase = getFinalPhase(Args, &FinalPhaseArg);
- 
+
    if (FinalPhase == phases::Link) {
 +    if (Args.hasArgNoClaim(options::OPT_hipstdpar)) {
 +      Args.AddFlagArg(nullptr, getOpts().getOption(options::OPT_hip_link));
@@ -751,13 +751,13 @@ index 3f08c0ef5d6f..04d9f9218879 100644
    bool UsesRuntimeWrapper = VersionMajorMinor > llvm::VersionTuple(3, 5) &&
                              !DriverArgs.hasArg(options::OPT_nohipwrapperinc);
 +  bool HasHipStdPar = DriverArgs.hasArg(options::OPT_hipstdpar);
- 
+
    if (!DriverArgs.hasArg(options::OPT_nobuiltininc)) {
      // HIP header includes standard library wrapper headers under clang
 @@ -529,8 +544,45 @@ void RocmInstallationDetector::AddHIPIncludeArgs(const ArgList &DriverArgs,
      CC1Args.push_back(DriverArgs.MakeArgString(P));
    }
- 
+
 -  if (DriverArgs.hasArg(options::OPT_nogpuinc))
 +  const auto HandleHipStdPar = [=, &DriverArgs, &CC1Args]() {
 +    if (!hasHIPStdParLibrary()) {
@@ -798,7 +798,7 @@ index 3f08c0ef5d6f..04d9f9218879 100644
 +
      return;
 +  }
- 
+
    if (!hasHIPRuntime()) {
      D.Diag(diag::err_drv_no_hip_runtime);
 @@ -541,6 +593,8 @@ void RocmInstallationDetector::AddHIPIncludeArgs(const ArgList &DriverArgs,
@@ -808,13 +808,13 @@ index 3f08c0ef5d6f..04d9f9218879 100644
 +  if (HasHipStdPar)
 +    HandleHipStdPar();
  }
- 
+
  void amdgpu::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 diff --git a/clang/lib/Driver/ToolChains/Clang.cpp b/clang/lib/Driver/ToolChains/Clang.cpp
-index aaed70a1461e..a1b96b1aebb5 100644
+index 0653c4c09ebc..320eb98f956d 100644
 --- a/clang/lib/Driver/ToolChains/Clang.cpp
 +++ b/clang/lib/Driver/ToolChains/Clang.cpp
-@@ -6551,6 +6551,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
+@@ -6552,6 +6552,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
      if (Args.hasFlag(options::OPT_fgpu_allow_device_init,
                       options::OPT_fno_gpu_allow_device_init, false))
        CmdArgs.push_back("-fgpu-allow-device-init");
@@ -837,7 +837,7 @@ index 7ff880270cab..9fb461202990 100644
                          "-plugin-opt=-amdgpu-internalize-symbols"};
 +  if (Args.hasArg(options::OPT_hipstdpar))
 +    LldArgs.push_back("-plugin-opt=-amdgpu-enable-hipstdpar");
- 
+
    auto &TC = getToolChain();
    auto &D = TC.getDriver();
 @@ -246,6 +248,8 @@ void HIPAMDToolChain::addClangTargetOptions(
@@ -846,7 +846,7 @@ index 7ff880270cab..9fb461202990 100644
      CC1Args.append({"-mllvm", "-amdgpu-internalize-symbols"});
 +  if (DriverArgs.hasArgNoClaim(options::OPT_hipstdpar))
 +    CC1Args.append({"-mllvm", "-amdgpu-enable-hipstdpar"});
- 
+
    StringRef MaxThreadsPerBlock =
        DriverArgs.getLastArgValue(options::OPT_gpu_max_threads_per_block_EQ);
 diff --git a/clang/lib/Driver/ToolChains/ROCm.h b/clang/lib/Driver/ToolChains/ROCm.h
@@ -860,7 +860,7 @@ index 554d8a6929ac..dceb0ab03669 100644
 +  bool HasHIPStdParLibrary = false;
 +  bool HasRocThrustLibrary = false;
 +  bool HasRocPrimLibrary = false;
- 
+
    // Default version if not detected or specified.
    const unsigned DefaultVersionMajor = 3;
 @@ -96,6 +99,13 @@ class RocmInstallationDetector {
@@ -880,13 +880,13 @@ index 554d8a6929ac..dceb0ab03669 100644
 @@ -180,6 +190,9 @@ class RocmInstallationDetector {
    /// Check whether we detected a valid ROCm device library.
    bool hasDeviceLibrary() const { return HasDeviceLibrary; }
- 
+
 +  /// Check whether we detected a valid HIP STDPAR Acceleration library.
 +  bool hasHIPStdParLibrary() const { return HasHIPStdParLibrary; }
 +
    /// Print information about the detected ROCm installation.
    void print(raw_ostream &OS) const;
- 
+
 diff --git a/clang/lib/Frontend/InitPreprocessor.cpp b/clang/lib/Frontend/InitPreprocessor.cpp
 index e5db8a654e67..846e5fce6de7 100644
 --- a/clang/lib/Frontend/InitPreprocessor.cpp
@@ -930,10 +930,10 @@ index cfea6493ced7..d97fd54700b4 100644
                            diag::err_capture_bad_target, Callee, *this)
          << Capture.getVariable();
 diff --git a/clang/lib/Sema/SemaExpr.cpp b/clang/lib/Sema/SemaExpr.cpp
-index f9badf4ede84..0d939b3eeb3d 100644
+index 1d457e116bb5..117195e42dda 100644
 --- a/clang/lib/Sema/SemaExpr.cpp
 +++ b/clang/lib/Sema/SemaExpr.cpp
-@@ -19111,7 +19111,7 @@ MarkVarDeclODRUsed(ValueDecl *V, SourceLocation Loc, Sema &SemaRef,
+@@ -19118,7 +19118,7 @@ MarkVarDeclODRUsed(ValueDecl *V, SourceLocation Loc, Sema &SemaRef,
        // Diagnose ODR-use of host global variables in device functions.
        // Reference of device global variables in host functions is allowed
        // through shadow variables therefore it is not diagnosed.
@@ -948,7 +948,7 @@ index 2acb269f0423..83351b703c15 100644
 +++ b/clang/lib/Sema/SemaStmtAsm.cpp
 @@ -271,7 +271,8 @@ StmtResult Sema::ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
        OutputName = Names[i]->getName();
- 
+
      TargetInfo::ConstraintInfo Info(Literal->getString(), OutputName);
 -    if (!Context.getTargetInfo().validateOutputConstraint(Info)) {
 +    if (!Context.getTargetInfo().validateOutputConstraint(Info) &&
@@ -1230,10 +1230,10 @@ index 576d0f3ff442..e42edfe94969 100644
    InstCombine
    IRPrinter
 diff --git a/llvm/lib/Passes/PassBuilder.cpp b/llvm/lib/Passes/PassBuilder.cpp
-index 2b46a82c769a..6c7d63a4589f 100644
+index 1fdeb13706ca..8c7d3a0b15ba 100644
 --- a/llvm/lib/Passes/PassBuilder.cpp
 +++ b/llvm/lib/Passes/PassBuilder.cpp
-@@ -93,6 +93,7 @@
+@@ -94,6 +94,7 @@
  #include "llvm/Transforms/Coroutines/CoroEarly.h"
  #include "llvm/Transforms/Coroutines/CoroElide.h"
  #include "llvm/Transforms/Coroutines/CoroSplit.h"
@@ -1254,7 +1254,7 @@ index aa42fb377114..0553146e70a8 100644
  #include "llvm/Transforms/IPO/Annotation2Metadata.h"
  #include "llvm/Transforms/IPO/ArgumentPromotion.h"
 diff --git a/llvm/lib/Passes/PassRegistry.def b/llvm/lib/Passes/PassRegistry.def
-index 63704d2d1b0c..d713eb7c3bc4 100644
+index adfbce53f56f..dae329710039 100644
 --- a/llvm/lib/Passes/PassRegistry.def
 +++ b/llvm/lib/Passes/PassRegistry.def
 @@ -108,6 +108,9 @@ MODULE_PASS("rpo-function-attrs", ReversePostOrderFunctionAttrsPass())
@@ -1268,7 +1268,7 @@ index 63704d2d1b0c..d713eb7c3bc4 100644
  MODULE_PASS("strip-dead-debug-info", StripDeadDebugInfoPass())
  MODULE_PASS("pseudo-probe", SampleProfileProbePass(TM))
 diff --git a/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp b/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp
-index 43c9f183f17b..8820ce2add3d 100644
+index 2e6b29d986af..bbcfc27b39de 100644
 --- a/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp
 +++ b/llvm/lib/Target/AMDGPU/AMDGPUTargetMachine.cpp
 @@ -50,6 +50,7 @@
@@ -1282,7 +1282,7 @@ index 43c9f183f17b..8820ce2add3d 100644
 @@ -343,6 +344,11 @@ static cl::opt<bool> EnableRewritePartialRegUses(
      cl::desc("Enable rewrite partial reg uses pass"), cl::init(false),
      cl::Hidden);
- 
+
 +static cl::opt<bool> EnableHipStdPar(
 +  "amdgpu-enable-hipstdpar",
 +  cl::desc("Enable HIP Standard Parallelism Offload support"), cl::init(false),
@@ -1298,7 +1298,7 @@ index 43c9f183f17b..8820ce2add3d 100644
 +        if (EnableHipStdPar)
 +          PM.addPass(HipStdParAcceleratorCodeSelectionPass());
        });
- 
+
    PB.registerPipelineEarlySimplificationEPCallback(
 diff --git a/llvm/lib/Transforms/CMakeLists.txt b/llvm/lib/Transforms/CMakeLists.txt
 index dda5f6de11e3..84a7e34147d0 100644
