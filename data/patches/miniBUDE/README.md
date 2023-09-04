@@ -1,7 +1,7 @@
 # miniBUDE
 
 - url: <https://github.com/UoB-HPC/miniBUDE>
-- branch: `v2` at `db0570985356b3dafd1d675d44c9f89ee9e186a9`
+- branch: `v2` at `bea30762acaefee54ebaf3c68713b66414345e12`
 - notes:
   - the following variables are added to CMake:
     - `CLANG_STDPAR_PATH`: specifies the path to the forwarding header
