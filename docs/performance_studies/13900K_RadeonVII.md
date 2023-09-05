@@ -288,6 +288,21 @@ directly.
 | aa_aos           | 86              | 316             | 3                        |
 | aa_soa           | 124             | 695             | 5                        |
 
+## TeaLeaf
+
+- [repo](https://github.com/UoB-HPC/TeaLeaf)
+- [patch](../../data/patches/TeaLeaf/TEALEAF.patch)
+
+| Test            | A - CPU (s) | B - GPU (s) | A / B (higher is better) |
+|:---------------:|:-----------:|:-----------:|:------------------------:|
+| tea_bm_4        | 7           | 3.5         | 2                        |
+| tea_bm_5        | 1985        | 138         | 14                       |
+| tea_bm_5e_1     | 7           | 3.5         | 2                        |
+| tea_bm_5e_2     | 214         | 22          | 11                       |
+| tea_bm_5e_4     | 2002        | 139         | 14                       |
+| tea_bm_5e_8     | TOO LONG    | 1139        | *                        |
+| tea_bm_6        | TOO LONG    | 1159        | *                        |
+
 ## `traccc`
 
 - [repo](https://github.com/ugGit/traccc)

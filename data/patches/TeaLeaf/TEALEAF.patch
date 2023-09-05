@@ -1,0 +1,43 @@
+diff --git a/src/std-indices/model.cmake b/src/std-indices/model.cmake
+index 409a285..04a7961 100644
+--- a/src/std-indices/model.cmake
++++ b/src/std-indices/model.cmake
+@@ -35,6 +35,19 @@ register_flag_optional(USE_ONEDPL
+                    This requires the DPC++ compiler (other SYCL compilers are untested), required SYCL flags are added automatically."
+         "OFF")
+ 
++register_flag_optional(CLANG_OFFLOAD
++        "Enable offloading support (via the non-standard `-hipstdpar`) for
++         Clang/LLVM. The values are AMDGPU processors (https://www.llvm.org/docs/AMDGPUUsage.html#processors)
++         which will be passed in via `--offload-arch=` argument.
++
++         Example values are:
++           gfx906  - Compile for Vega20 GPUs
++           gfx908  - Compile for CDNA1 GPUs
++           gfx90a  - Compile for CDNA2 GPUs
++           gfx1030 - Compile for RDNA2 NV21 GPUs
++           gfx1100 - Compile for RDNA3 NV31 GPUs"
++        "")
++
+ macro(setup)
+     set(CMAKE_CXX_STANDARD 17) # because SYCL oneDPL is C++17, NVHPC isn't bound by this
+ 
+@@ -62,5 +75,17 @@ macro(setup)
+         register_append_link_flags(${NVHPC_FLAGS})
+     endif ()
+ 
++    if (CLANG_OFFLOAD)
++        set(CLANG_FLAGS
++                --hipstdpar
++                --hipstdpar-path=${CLANG_HIPSTDPAR_PATH}
++                --offload-arch=${CLANG_OFFLOAD})
++        if (NOT CLANG_OFFLOAD MATCHES "^gfx9")
++                list(APPEND CLANG_FLAGS --hipstdpar-interpose-alloc)
++        endif ()
++
++        register_append_cxx_flags(ANY ${CLANG_FLAGS})
++        register_append_link_flags(--hipstdpar)
++    endif ()
+ 
+ endmacro()
+\ No newline at end of file
