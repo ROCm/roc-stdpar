@@ -1,7 +1,7 @@
 # `p2r-tests`
 
 - url: <https://github.com/cerati/p2r-tests>
-- branch: `main` at `88e88ab3814dfc535eba8c31970f985eff8681b8`
+- branch: `main` at `1e6446d34652d08ec46ffb42f5686c847e47960e`
 - notes:
   - the `build.py` build script is extended with `clang` and `clang_gpu`
     compilers, both of which apply to the `pstl` technology

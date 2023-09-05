@@ -101,7 +101,7 @@ index 82c5b09..ffa738a 100755
  
      if technology == "tbb" :
 diff --git a/src/propagate-tor-test_pstl.cpp b/src/propagate-tor-test_pstl.cpp
-index 09c6697..ab18b28 100644
+index 2e7f237..ca4b7af 100644
 --- a/src/propagate-tor-test_pstl.cpp
 +++ b/src/propagate-tor-test_pstl.cpp
 @@ -21,7 +21,7 @@ g++ -O3 -I. -fopenmp -mavx512f -std=c++17 src/propagate-tor-test_pstl.cpp -lm -l
@@ -109,7 +109,7 @@ index 09c6697..ab18b28 100644
  
  
 -#if defined(__NVCOMPILER_CUDA__)
-+#if defined(__NVCOMPILER_CUDA__) || defined(__STDPAR__)
++#if defined(__NVCOMPILER_CUDA__) || defined(__HIPSTDPAR__)
  constexpr bool use_cuda = true;
  #else
  constexpr bool use_cuda = false;
@@ -118,7 +118,7 @@ index 09c6697..ab18b28 100644
  #endif
  
 -#if defined(__NVCOMPILER_CUDA__)
-+#if defined(__NVCOMPILER_CUDA__) || defined(__STDPAR__)
++#if defined(__NVCOMPILER_CUDA__) || defined(__HIPSTDPAR__)
  #ifdef include_data
  constexpr bool include_data_transfer = true;
  #else
