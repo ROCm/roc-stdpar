@@ -1,7 +1,7 @@
 # pp-EnKF
 
 - url: <https://github.com/yasahi-hpc/pp-EnKF>
-- branch: `main` at `e446499c2923b80ab2bb96b27c8ef062e3101091`
+- branch: `main` at `3fa038147ecb644891bbb5b63b84bb8d0affa786`
 - notes:
   - the value `CLANG` is added to the set of possible values for the `BACKEND`
     CMake variable, and it's used to select Clang/LLVM Standard Algorithm

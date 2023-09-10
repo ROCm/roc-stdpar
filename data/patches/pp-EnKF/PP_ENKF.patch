@@ -20,6 +20,41 @@ index ebb51ee..67bdca3 100644
      add_subdirectory(tutorial)
  endif()
  
+diff --git a/ext_lib/eigen b/ext_lib/eigen
+index 18018ed..a798d07 160000
+--- a/ext_lib/eigen
++++ b/ext_lib/eigen
+@@ -1 +1 @@
+-Subproject commit 18018ed013029ca3f28f52a62360999b5a659eac
++Subproject commit a798d076596343b89b18e44c8033d77d22e19892
+diff --git a/ext_lib/googletest b/ext_lib/googletest
+index 8a6feab..455fcb7 160000
+--- a/ext_lib/googletest
++++ b/ext_lib/googletest
+@@ -1 +1 @@
+-Subproject commit 8a6feabf04bec8fb125e0df0ad1195c42350725f
++Subproject commit 455fcb7773dedc70ab489109fb12d8abc7fd59b6
+diff --git a/ext_lib/json b/ext_lib/json
+index 788e546..5d27543 160000
+--- a/ext_lib/json
++++ b/ext_lib/json
+@@ -1 +1 @@
+-Subproject commit 788e5468e4cb4573941600d5c39ccd552dc8a429
++Subproject commit 5d2754306d67d1e654a1a34e1d2e74439a9d53b3
+diff --git a/ext_lib/mdspan b/ext_lib/mdspan
+index f840358..9d0a451 160000
+--- a/ext_lib/mdspan
++++ b/ext_lib/mdspan
+@@ -1 +1 @@
+-Subproject commit f84035865a92241a5163d8d0e5100aea037892ca
++Subproject commit 9d0a451e11177cbdeaef035c7914b0aa73ddd1e2
+diff --git a/ext_lib/stdexec b/ext_lib/stdexec
+index dc90c30..0693876 160000
+--- a/ext_lib/stdexec
++++ b/ext_lib/stdexec
+@@ -1 +1 @@
+-Subproject commit dc90c30ff4968d5043299f97a8294d3f4a6c62e4
++Subproject commit 0693876c6144479ab5d9bec671751bd32d14e23a
 diff --git a/lib/FFT.hpp b/lib/FFT.hpp
 index 758d5fe..a20510c 100644
 --- a/lib/FFT.hpp
