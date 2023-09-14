@@ -1,9 +1,6 @@
-diff --git a/LULESH.patch b/LULESH.patch
-new file mode 100644
-index 0000000..e69de29
 diff --git a/stdpar/build/Makefile-stdpar b/stdpar/build/Makefile-stdpar
 new file mode 100644
-index 0000000..529f530
+index 0000000..325cbab
 --- /dev/null
 +++ b/stdpar/build/Makefile-stdpar
 @@ -0,0 +1,36 @@
@@ -24,8 +21,8 @@ index 0000000..529f530
 +	lulesh-init.cc
 +OBJECTS2.0 = $(SOURCES2.0:.cc=.o)
 +
-+CXXFLAGS = -O3 --hipstdpar --hipstdpar-path=${STDPAR_PATH} -std=c++17 -DUSE_MPI=0 --offload-arch=${STDPAR_TARGET}
-+LDFLAGS = --hipstdpar -ltbb
++CXXFLAGS = -O3 --hipstdpar --hipstdpar-path=${STDPAR_PATH} -std=c++17 -DUSE_MPI=0 --offload-arch=${STDPAR_TARGET} -march=native
++LDFLAGS = -ltbb --hipstdpar
 +
 +%.o: ../src/%.cc ../src/lulesh.h
 +	@echo "Building $<"
@@ -43,6 +40,19 @@ index 0000000..529f530
 +clean:
 +	/bin/rm -f *.o *~ $(OBJECTS) $(LULESH_EXEC)
 +	/bin/rm -rf *.dSYM
+diff --git a/stdpar/src/lulesh-util.cc b/stdpar/src/lulesh-util.cc
+index d2a014c..9b8133e 100644
+--- a/stdpar/src/lulesh-util.cc
++++ b/stdpar/src/lulesh-util.cc
+@@ -205,7 +205,7 @@ void VerifyAndWriteFinalOutput(Real_t elapsed_time,
+
+          if (MaxAbsDiff <AbsDiff) MaxAbsDiff = AbsDiff;
+
+-         Real_t RelDiff = AbsDiff / locDom.e(k*nx+j);
++         Real_t RelDiff = FABS(locDom.e(k*nx+j)) > 1e-8 ? AbsDiff / locDom.e(k*nx+j) : 0.0;
+
+          if (MaxRelDiff <RelDiff)  MaxRelDiff = RelDiff;
+       }
 diff --git a/stdpar/src/lulesh.cc b/stdpar/src/lulesh.cc
 index 3928c2c..e613359 100644
 --- a/stdpar/src/lulesh.cc
@@ -50,7 +60,7 @@ index 3928c2c..e613359 100644
 @@ -277,7 +277,7 @@ static inline void InitStressTermsForElems(Domain &domain, Real_t *sigxx,
    // pull in the stresses appropriate to the hydro integration
    //
- 
+
 -  std::for_each_n(std::execution::par, counting_iterator(0), numElem,
 +  std::for_each_n(std::execution::par_unseq, counting_iterator(0), numElem,
                    [=, &domain](Index_t i) {
@@ -58,7 +68,7 @@ index 3928c2c..e613359 100644
                    });
 @@ -496,7 +496,7 @@ static inline void IntegrateStressForElems(Domain &domain, Real_t *sigxx,
    // loop over all elements
- 
+
    std::for_each_n(
 -      std::execution::par, counting_iterator(0), numElem,
 +      std::execution::par_unseq, counting_iterator(0), numElem,
@@ -66,7 +76,7 @@ index 3928c2c..e613359 100644
          const Index_t *const elemToNode = domain.nodelist(k);
          Real_t B[3][8]; // shape function derivatives
 @@ -523,7 +523,7 @@ static inline void IntegrateStressForElems(Domain &domain, Real_t *sigxx,
- 
+
    // If threaded, then we need to copy the data out of the temporary
    // arrays used above into the final forces field
 -  std::for_each_n(std::execution::par, counting_iterator(0), numNode,
@@ -76,7 +86,7 @@ index 3928c2c..e613359 100644
                      Index_t *cornerList = domain.nodeElemCornerList(gnode);
 @@ -707,7 +707,7 @@ static inline void CalcFBHourglassForceForElems(Domain &domain, Real_t *determ,
    /*    compute the hourglass modes */
- 
+
    std::for_each_n(
 -      std::execution::par, counting_iterator(0), numElem,
 +      std::execution::par_unseq, counting_iterator(0), numElem,
@@ -85,7 +95,7 @@ index 3928c2c..e613359 100644
          Real_t hgfx[8], hgfy[8], hgfz[8];
 @@ -856,7 +856,7 @@ static inline void CalcFBHourglassForceForElems(Domain &domain, Real_t *determ,
        });
- 
+
    // Collect the data from the local arrays into the final force arrays
 -  std::for_each_n(std::execution::par, counting_iterator(0), numNode,
 +  std::for_each_n(std::execution::par_unseq, counting_iterator(0), numNode,
@@ -94,7 +104,7 @@ index 3928c2c..e613359 100644
                      Index_t *cornerList = domain.nodeElemCornerList(gnode);
 @@ -889,7 +889,7 @@ static inline void CalcHourglassControlForElems(Domain &domain, Real_t determ[],
    Real_t *z8n = Allocate<Real_t>(numElem8);
- 
+
    /* start loop over elements */
 -  std::for_each_n(std::execution::par, counting_iterator(0), numElem,
 +  std::for_each_n(std::execution::par_unseq, counting_iterator(0), numElem,
@@ -102,7 +112,7 @@ index 3928c2c..e613359 100644
                      Real_t x1[8], y1[8], z1[8];
                      Real_t pfx[8], pfy[8], pfz[8];
 @@ -914,7 +914,7 @@ static inline void CalcHourglassControlForElems(Domain &domain, Real_t determ[],
- 
+
                      determ[i] = domain.volo(i) * domain.v(i);
                    });
 -  if (std::any_of(std::execution::par, domain.v_begin(), domain.v_end(),
@@ -112,7 +122,7 @@ index 3928c2c..e613359 100644
    }
 @@ -954,7 +954,7 @@ static inline void CalcVolumeForceForElems(Domain &domain) {
                              domain.numNode());
- 
+
      // check for negative element volume
 -    if (std::any_of(std::execution::par, determ, determ + numElem,
 +    if (std::any_of(std::execution::par_unseq, determ, determ + numElem,
@@ -122,7 +132,7 @@ index 3928c2c..e613359 100644
 @@ -973,11 +973,11 @@ static inline void CalcVolumeForceForElems(Domain &domain) {
  static inline void CalcForceForNodes(Domain &domain) {
    Index_t numNode = domain.numNode();
- 
+
 -  std::fill(std::execution::par, domain.fx_begin(), domain.fx_end(),
 +  std::fill(std::execution::par_unseq, domain.fx_begin(), domain.fx_end(),
              Real_t(0.0));
@@ -132,11 +142,11 @@ index 3928c2c..e613359 100644
 -  std::fill(std::execution::par, domain.fz_begin(), domain.fz_end(),
 +  std::fill(std::execution::par_unseq, domain.fz_begin(), domain.fz_end(),
              Real_t(0.0));
- 
+
    /* Calcforce calls partial, force, hourq */
 @@ -987,13 +987,13 @@ static inline void CalcForceForNodes(Domain &domain) {
  /******************************************/
- 
+
  static inline void CalcAccelerationForNodes(Domain &domain, Index_t numNode) {
 -  std::transform(std::execution::par, domain.fx_begin(), domain.fx_end(),
 +  std::transform(std::execution::par_unseq, domain.fx_begin(), domain.fx_end(),
@@ -153,7 +163,7 @@ index 3928c2c..e613359 100644
  }
 @@ -1005,19 +1005,19 @@ static inline void ApplyAccelerationBoundaryConditionsForNodes(Domain &domain) {
    Index_t numNodeBC = (size + 1) * (size + 1);
- 
+
    if (!domain.symmXempty()) {
 -    std::for_each(std::execution::par, domain.symmX_begin(),
 +    std::for_each(std::execution::par_unseq, domain.symmX_begin(),
@@ -175,7 +185,7 @@ index 3928c2c..e613359 100644
                      domain.zdd(symmZ) = Real_t(0.0);
                    });
 @@ -1028,7 +1028,7 @@ static inline void ApplyAccelerationBoundaryConditionsForNodes(Domain &domain) {
- 
+
  static inline void CalcVelocityForNodes(Domain &domain, const Real_t dt,
                                          const Real_t u_cut, Index_t numNode) {
 -  std::transform(std::execution::par, domain.xd_begin(), domain.xd_end(),
@@ -202,7 +212,7 @@ index 3928c2c..e613359 100644
                   [=](Real_t zd, Real_t zdd) {
                     Real_t zdnew = zd + zdd * dt;
 @@ -1058,13 +1058,13 @@ static inline void CalcVelocityForNodes(Domain &domain, const Real_t dt,
- 
+
  static inline void CalcPositionForNodes(Domain &domain, const Real_t dt,
                                          Index_t numNode) {
 -  std::transform(std::execution::par, domain.x_begin(), domain.x_end(),
@@ -219,7 +229,7 @@ index 3928c2c..e613359 100644
                   [=](Real_t z, Real_t zd) { return z + zd * dt; });
  }
 @@ -1294,7 +1294,7 @@ void CalcKinematicsForElems(Domain &domain, Real_t deltaTime, Index_t numElem) {
- 
+
    // loop over all elements
    std::for_each_n(
 -      std::execution::par, counting_iterator(0), numElem,
@@ -229,7 +239,7 @@ index 3928c2c..e613359 100644
          Real_t D[6];
 @@ -1362,7 +1362,7 @@ static inline void CalcLagrangeElements(Domain &domain) {
      CalcKinematicsForElems(domain, deltatime, numElem);
- 
+
      // element loop to do some stuff not included in the elemlib function.
 -    std::for_each_n(std::execution::par, counting_iterator(0), numElem,
 +    std::for_each_n(std::execution::par_unseq, counting_iterator(0), numElem,
@@ -247,7 +257,7 @@ index 3928c2c..e613359 100644
      }
 @@ -1391,7 +1391,7 @@ static inline void CalcMonotonicQGradientsForElems(Domain &domain) {
    Index_t numElem = domain.numElem();
- 
+
    std::for_each_n(
 -      std::execution::par, counting_iterator(0), numElem, [&domain](Index_t i) {
 +      std::execution::par_unseq, counting_iterator(0), numElem, [&domain](Index_t i) {
@@ -256,7 +266,7 @@ index 3928c2c..e613359 100644
          Real_t dxv, dyv, dzv;
 @@ -1553,7 +1553,7 @@ static inline void CalcMonotonicQRegionForElems(Domain &domain, Int_t r,
    Real_t qqc_monoq = domain.qqc_monoq();
- 
+
    std::for_each_n(
 -      std::execution::par, counting_iterator(0), domain.regElemSize(r),
 +      std::execution::par_unseq, counting_iterator(0), domain.regElemSize(r),
@@ -274,7 +284,7 @@ index 3928c2c..e613359 100644
                   });
 -  std::fill(std::execution::par, pbvc, pbvc + length, cls);
 +  std::fill(std::execution::par_unseq, pbvc, pbvc + length, cls);
- 
+
    std::for_each_n(
 -      std::execution::par, counting_iterator(0), length, [=](Index_t i) {
 +      std::execution::par_unseq, counting_iterator(0), length, [=](Index_t i) {
@@ -283,26 +293,26 @@ index 3928c2c..e613359 100644
            newval = Real_t(0.0);
 @@ -1855,7 +1855,7 @@ CalcEnergyForElems(Real_t *p_new, Real_t *e_new, Real_t *q_new, Real_t *bvc,
    Real_t *pHalfStep = Allocate<Real_t>(length);
- 
+
    std::for_each_n(
 -      std::execution::par, counting_iterator(0), length, [=](Index_t i) {
 +      std::execution::par_unseq, counting_iterator(0), length, [=](Index_t i) {
          e_new[i] = e_old[i] - Real_t(0.5) * delvc[i] * (p_old[i] + q_old[i]) +
                     Real_t(0.5) * work[i];
- 
+
 @@ -1868,7 +1868,7 @@ CalcEnergyForElems(Real_t *p_new, Real_t *e_new, Real_t *q_new, Real_t *bvc,
                         p_cut, eosvmax, length, regElemList);
- 
+
    std::for_each_n(
 -      std::execution::par, counting_iterator(0), length, [=](Index_t i) {
 +      std::execution::par_unseq, counting_iterator(0), length, [=](Index_t i) {
          Real_t vhalf = Real_t(1.) / (Real_t(1.) + compHalfStep[i]);
- 
+
          if (delvc[i] > Real_t(0.)) {
 @@ -1892,7 +1892,7 @@ CalcEnergyForElems(Real_t *p_new, Real_t *e_new, Real_t *q_new, Real_t *bvc,
                                     Real_t(4.0) * (pHalfStep[i] + q_new[i]));
        });
- 
+
 -  std::transform(std::execution::par, e_new, e_new + length, work, e_new,
 +  std::transform(std::execution::par_unseq, e_new, e_new + length, work, e_new,
                   [=](Real_t en, Real_t w) {
@@ -310,7 +320,7 @@ index 3928c2c..e613359 100644
                     if (std::abs(newval) < e_cut) {
 @@ -1908,7 +1908,7 @@ CalcEnergyForElems(Real_t *p_new, Real_t *e_new, Real_t *q_new, Real_t *bvc,
                         eosvmax, length, regElemList);
- 
+
    std::for_each_n(
 -      std::execution::par, counting_iterator(0), length, [=](Index_t i) {
 +      std::execution::par_unseq, counting_iterator(0), length, [=](Index_t i) {
@@ -319,12 +329,12 @@ index 3928c2c..e613359 100644
          Real_t q_tilde;
 @@ -1946,7 +1946,7 @@ CalcEnergyForElems(Real_t *p_new, Real_t *e_new, Real_t *q_new, Real_t *bvc,
                         eosvmax, length, regElemList);
- 
+
    std::for_each_n(
 -      std::execution::par, counting_iterator(0), length, [=](Index_t i) {
 +      std::execution::par_unseq, counting_iterator(0), length, [=](Index_t i) {
          Index_t ielem = regElemList[i];
- 
+
          if (delvc[i] <= Real_t(0.)) {
 @@ -1980,7 +1980,7 @@ static inline void CalcSoundSpeedForElems(Domain &domain, Real_t *vnewc,
                                            Real_t *bvc, Real_t ss4o3,
@@ -347,14 +357,14 @@ index 3928c2c..e613359 100644
 @@ -2042,7 +2042,7 @@ static inline void EvalEOSForElems(Domain &domain, Real_t *vnewc,
                        ql_old[i] = domain.ql(ielem);
                      });
- 
+
 -    std::for_each_n(std::execution::par, counting_iterator(0), numElemReg,
 +    std::for_each_n(std::execution::par_unseq, counting_iterator(0), numElemReg,
                      [=](Index_t i) {
                        Index_t ielem = regElemList[i];
                        Real_t vchalf;
 @@ -2053,7 +2053,7 @@ static inline void EvalEOSForElems(Domain &domain, Real_t *vnewc,
- 
+
      /* Check for v > eosvmax or v < eosvmin */
      if (eosvmin != Real_t(0.)) {
 -      std::for_each_n(std::execution::par, counting_iterator(0), numElemReg,
@@ -382,7 +392,7 @@ index 3928c2c..e613359 100644
                         p_cut, e_cut, q_cut, emin, qq_old, ql_old, rho0, eosvmax,
                         numElemReg, regElemList);
    }
- 
+
 -  std::for_each_n(std::execution::par, counting_iterator(0), numElemReg,
 +  std::for_each_n(std::execution::par_unseq, counting_iterator(0), numElemReg,
                    [=, &domain](Index_t i) {
@@ -391,24 +401,24 @@ index 3928c2c..e613359 100644
 @@ -2119,24 +2119,24 @@ static inline void ApplyMaterialPropertiesForElems(Domain &domain) {
      Real_t eosvmax = domain.eosvmax();
      Real_t *vnewc = Allocate<Real_t>(numElem);
- 
+
 -    std::copy(std::execution::par, domain.vnew_begin(), domain.vnew_end(),
 +    std::copy(std::execution::par_unseq, domain.vnew_begin(), domain.vnew_end(),
                vnewc);
- 
+
      // Bound the updated relative volumes with eosvmin/max
      if (eosvmin != Real_t(0.)) {
 -      std::transform(std::execution::par, vnewc, vnewc + numElem, vnewc,
 +      std::transform(std::execution::par_unseq, vnewc, vnewc + numElem, vnewc,
                       [=](Real_t vc) { return vc < eosvmin ? eosvmin : vc; });
      }
- 
+
      if (eosvmax != Real_t(0.)) {
 -      std::transform(std::execution::par, vnewc, vnewc + numElem, vnewc,
 +      std::transform(std::execution::par_unseq, vnewc, vnewc + numElem, vnewc,
                       [=](Real_t vc) { return vc > eosvmax ? eosvmax : vc; });
      }
- 
+
      // This check may not make perfect sense in LULESH, but
      // it's representative of something in the full code -
      // just leave it in, please
@@ -418,7 +428,7 @@ index 3928c2c..e613359 100644
                        if (eosvmin != Real_t(0.0) && vc < eosvmin) {
                          vc = eosvmin;
 @@ -2174,7 +2174,7 @@ static inline void ApplyMaterialPropertiesForElems(Domain &domain) {
- 
+
  static inline void UpdateVolumesForElems(Domain &domain, Real_t v_cut,
                                           Index_t length) {
 -  std::transform(std::execution::par, domain.vnew_begin(), domain.vnew_end(),
@@ -445,21 +455,20 @@ index 3928c2c..e613359 100644
        [=, &domain](Index_t i) {
          Index_t indx = regElemlist[i];
 diff --git a/stdpar/src/lulesh.h b/stdpar/src/lulesh.h
-index b13eedd..71b2bdc 100644
+index b13eedd..336456b 100644
 --- a/stdpar/src/lulesh.h
 +++ b/stdpar/src/lulesh.h
 @@ -44,7 +44,13 @@ inline real4  SQRT(real4  arg) { return sqrtf(arg) ; }
  inline real8  SQRT(real8  arg) { return sqrt(arg) ; }
  inline real10 SQRT(real10 arg) { return sqrtl(arg) ; }
- 
--inline real4  CBRT(real4  arg) { return cbrtf(arg) ; }
-+inline real4  CBRT(real4  arg) {
-+  #ifdef __HIPSTDPAR__
-+    return powf(arg, 1.f / 3.f); // Temporary workaround.
-+  #else
-+    return cbrtf(arg);
-+  #endif
-+}
+
++#ifdef __HIPSTDPAR__
++  __device__
++#endif
+ inline real4  CBRT(real4  arg) { return cbrtf(arg) ; }
++#ifdef __HIPSTDPAR__
++  __device__
++#endif
  inline real8  CBRT(real8  arg) { return cbrt(arg) ; }
  inline real10 CBRT(real10 arg) { return cbrtl(arg) ; }
- 
+
