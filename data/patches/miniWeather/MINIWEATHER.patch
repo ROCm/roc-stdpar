@@ -1,14 +1,15 @@
 diff --git a/cpp/CMakeLists.txt b/cpp/CMakeLists.txt
-index 7deaaf8..65985ab 100644
+index 7deaaf8..6a79ec5 100644
 --- a/cpp/CMakeLists.txt
 +++ b/cpp/CMakeLists.txt
-@@ -130,6 +130,16 @@ if (("${CMAKE_CXX_COMPILER_ID}" STREQUAL "PGI" OR ${CMAKE_CXX_COMPILER_ID} STREQ
+@@ -130,6 +130,17 @@ if (("${CMAKE_CXX_COMPILER_ID}" STREQUAL "PGI" OR ${CMAKE_CXX_COMPILER_ID} STREQ
    MESSAGE(STATUS "    Detected NVIDIA compiler, adding \"-stdpar=gpu\" to CXX flags. Set STDPAR_FLAGS to override.")
  endif()
  set(_COMPILER_FLAGS "${EXE_DEFS} -I${PNETCDF_PATH}/include ${STDPAR_FLAGS}")
 +if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
-+  if (${STDPAR_FLAGS} STREQUAL "")
++  if ("${STDPAR_FLAGS}" STREQUAL "")
 +    set(STDPAR_FLAGS " --hipstdpar")
++    string(APPEND _COMPILER_FLAGS ${STDPAR_FLAGS})
 +    MESSAGE(STATUS "    Detected HIP Clang compiler, adding \"--hipstdpar\" to CXX flags. Set STDPAR_FLAGS to override.")
 +  endif()
 +  string(APPEND _COMPILER_FLAGS " --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET}")
@@ -19,13 +20,14 @@ index 7deaaf8..65985ab 100644
  string(STRIP "${_COMPILER_FLAGS}" _COMPILER_FLAGS)
  set_target_properties(mpistdpar PROPERTIES COMPILE_FLAGS "${_COMPILER_FLAGS}")
  set(_LINK_FLAGS "-L${PNETCDF_PATH}/lib -lpnetcdf ${STDPAR_FLAGS}")
-@@ -141,6 +151,15 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "PGI" AND "${STDPAR_FLAGS}" STREQUAL "")
+@@ -141,6 +152,16 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "PGI" AND "${STDPAR_FLAGS}" STREQUAL "")
    set(STDPAR_FLAGS "-stdpar=gpu")
  endif()
  set(_COMPILER_FLAGS "${TEST_DEFS} -I${PNETCDF_PATH}/include ${STDPAR_FLAGS}")
 +if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
-+  if (${STDPAR_FLAGS} STREQUAL "")
++  if ("${STDPAR_FLAGS}" STREQUAL "")
 +    set(STDPAR_FLAGS " --hipstdpar")
++    string(APPEND _COMPILER_FLAGS ${STDPAR_FLAGS})
 +  endif()
 +  string(APPEND _COMPILER_FLAGS " --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET}")
 +  if (NOT ${STDPAR_TARGET} MATCHES "^gfx9")
@@ -130,7 +132,7 @@ index 980019a..2eab6b6 100644
      {
        return std::make_pair(a.first + b.first, a.second + b.second);
 diff --git a/cpp/miniWeather_stdpar.cpp b/cpp/miniWeather_stdpar.cpp
-index e0aa11a..36338cf 100644
+index e0aa11a..266a7b1 100644
 --- a/cpp/miniWeather_stdpar.cpp
 +++ b/cpp/miniWeather_stdpar.cpp
 @@ -233,7 +233,7 @@ void semi_discrete_step( double *state_init , double *state_forcing , double *st
