@@ -1,10 +1,11 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 4b98dd5..a6f6056 100644
+index 4b98dd5..10937c6 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -2,14 +2,62 @@ cmake_minimum_required(VERSION 3.12)
+@@ -1,15 +1,44 @@
+ cmake_minimum_required(VERSION 3.12)
  project(p2r_kokkos CXX) # C++ needed to build my project
- #find_package(Kokkos REQUIRED) # fail if Kokkos not found
+-#find_package(Kokkos REQUIRED) # fail if Kokkos not found
  
 -add_subdirectory(kokkos)
 +if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND DEFINED CLANG_STDPAR)
@@ -14,8 +15,7 @@ index 4b98dd5..a6f6056 100644
 -#add_executable(p2r_kokkos "./src/propagate-tor-test_kokkos.cpp")
 -add_executable(p2r_kokkos "./src/propagate-tor-test_kokkos_local.cpp")
 +    add_executable(
-+        clang_stdpar_cpu
-+            ${CMAKE_CURRENT_SOURCE_DIR}/src/propagate-tor-test_pstl.cpp)
++        clang_stdpar_cpu ${CMAKE_CURRENT_SOURCE_DIR}/src/propagate-tor-test_pstl.cpp)
 +    target_compile_options(
 +        clang_stdpar_cpu PRIVATE -march=native -fopenmp-simd -ffast-math)
 +    target_link_libraries(clang_stdpar_cpu PRIVATE TBB::tbb m)
@@ -33,34 +33,17 @@ index 4b98dd5..a6f6056 100644
 +        if (NOT STDPAR_TARGET MATCHES "^gfx9")
 +            target_compile_options(
 +                clang_stdpar_gpu PRIVATE --hipstdpar-interpose-alloc)
++        else ()
++            target_compile_definitions(clang_stdpar_gpu PRIVATE bsize=64)
 +        endif ()
-+    target_link_libraries(clang_stdpar_gpu PRIVATE m)
-+    target_link_options(clang_stdpar_gpu PRIVATE -hipstdpar)
++        target_link_libraries(clang_stdpar_gpu PRIVATE m)
++        target_link_options(clang_stdpar_gpu PRIVATE --hipstdpar)
++else ()
++    #find_package(Kokkos REQUIRED) # fail if Kokkos not found
  
 -# declare dependency on Kokkos, build p2r together with Kokkos, inheriting all the kokkos flags
 -#target_link_libraries(p2r_kokkos PRIVATE Kokkos::kokkos)    ## standalone build
 -target_link_libraries(p2r_kokkos Kokkos::kokkos)             ## JLSE build
-+    if (DEFINED NTRKS)
-+        target_compile_definitions(clang_stdpar_cpu PRIVATE ntrks=${NTRKS})
-+        target_compile_definitions(clang_stdpar_gpu PRIVATE ntrks=${NTRKS})
-+    endif ()
-+    if (DEFINED BSIZE)
-+        target_compile_definitions(clang_stdpar_cpu PRIVATE bsize=${BSIZE})
-+        target_compile_definitions(clang_stdpar_gpu PRIVATE bsize=${BSIZE})
-+    endif ()
-+    if (DEFINED NEVTS)
-+        target_compile_definitions(clang_stdpar_cpu PRIVATE nevts=${NEVTS})
-+        target_compile_definitions(clang_stdpar_gpu PRIVATE nevts=${NEVTS})
-+    endif ()
-+    if (DEFINED NITER)
-+        target_compile_definitions(clang_stdpar_cpu PRIVATE NITER=${NITER})
-+        target_compile_definitions(clang_stdpar_gpu PRIVATE NITER=${NITER})
-+    endif ()
-+    if (DEFINED NLAYER)
-+        target_compile_definitions(clang_stdpar_cpu PRIVATE nlayer=${NLAYER})
-+        target_compile_definitions(clang_stdpar_gpu PRIVATE nlayer=${NLAYER})
-+    endif ()
-+else ()
 +    add_subdirectory(kokkos)
 +
 +    # build my executable from the specified source code
