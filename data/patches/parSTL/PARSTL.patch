@@ -1,9 +1,33 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 0e6468a..9f716bb 100644
+index 0e6468a..2aa0d4b 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -21,7 +21,7 @@ else()
-     error("TBB_DIR not set")
+@@ -3,25 +3,25 @@ project(parSTL LANGUAGES CXX)
+ set(CMAKE_BUILD_TYPE Release)
+ 
+ if(HPX_DIR)
+-    set(HPX_DIR ${HPX_DIR} CACHE PATH "HPX_DIR")
++set(HPX_DIR ${HPX_DIR} CACHE PATH "HPX_DIR")
+ else()
+-    error("HPX_DIR not set")
++error("HPX_DIR not set")
+ endif()
+ 
+ if(Kokkos_DIR)
+-    set(Kokkos_DIR ${HPX_DIR} CACHE PATH "Kokkos_DIR")
++set(Kokkos_DIR ${HPX_DIR} CACHE PATH "Kokkos_DIR")
+ else()
+-    error("Kokkos_DIR not set")
++error("Kokkos_DIR not set")
+ endif()
+ 
+ # TBB package will be required for stdTbb build
+ if(TBB_DIR)
+-    set(TBB_DIR ${HPX_DIR} CACHE PATH "TBB_DIR")
++set(TBB_DIR ${HPX_DIR} CACHE PATH "TBB_DIR")
+ else()
+-    error("TBB_DIR not set")
++error("TBB_DIR not set")
  endif()
  
 -# nvhpc 22.9 and beyond is recommended 
@@ -12,36 +36,41 @@ index 0e6468a..9f716bb 100644
      set(NVCXX ${NVCXX} CACHE PATH "NVCXX")
  else()
 diff --git a/nvc/CMakeLists.txt b/nvc/CMakeLists.txt
-index 196721c..e421618 100644
+index 196721c..2632744 100644
 --- a/nvc/CMakeLists.txt
 +++ b/nvc/CMakeLists.txt
 @@ -1,9 +1,27 @@
  set(CMAKE_CXX_COMPILER ${NVCXX})
  
 -set(CMAKE_CXX_FLAGS "-w -fast -Mnouniform -Mfprelaxed -stdpar=multicore -std=c++11 -DUSE_MPI=0 --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/bin/")
- add_executable(nvcParMulticore nvcPar.cpp)
-+target_compile_definitions(nvcParMulticore PRIVATE USE_MPI=0)
- target_include_directories(nvcParMulticore PRIVATE "${CMAKE_CURRENT_LIST_DIR}/commons")
-+target_compile_options(nvcParMulticore PRIVATE -w -fast -std=c++17)
+-add_executable(nvcParMulticore nvcPar.cpp)
+-target_include_directories(nvcParMulticore PRIVATE "${CMAKE_CURRENT_LIST_DIR}/commons")    
 +if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-+    target_compile_options(nvcParMulticore PRIVATE -fopenmp-simd -march=native)
-+else ()
-+    target_compile_options(nvcParMulticore PRIVATE -Mnouniform -Mfprelaxed -stdpar=multicore --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/bin/)
-+endif()
-+target_link_libraries(nvcParMulticore PRIVATE tbb)
++    add_executable(nvcParMulticore nvcPar.cpp)
++    target_compile_definitions(nvcParMulticore PRIVATE USE_MPI=0)
++    target_include_directories(nvcParMulticore PRIVATE "${CMAKE_CURRENT_LIST_DIR}/commons")
++    target_compile_options(nvcParMulticore PRIVATE -fopenmp-simd -march=native -ffast-math)
++    target_link_libraries(nvcParMulticore PRIVATE tbb)
  
 -set(CMAKE_CXX_FLAGS "-w -fast -Mnouniform -Mfprelaxed -stdpar=gpu -std=c++11 -DUSE_MPI=0")
- add_executable(nvcParGpu nvcPar.cpp)
-+target_compile_definitions(nvcParGpu PRIVATE USE_MPI=0)
- target_include_directories(nvcParGpu PRIVATE "${CMAKE_CURRENT_LIST_DIR}/commons")
-+target_compile_options(nvcParGpu PRIVATE -w -fast)
-+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-+    target_compile_options(nvcParGpu PRIVATE --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
+-add_executable(nvcParGpu nvcPar.cpp)
+-target_include_directories(nvcParGpu PRIVATE "${CMAKE_CURRENT_LIST_DIR}/commons")    
++    add_executable(nvcParGpu nvcPar.cpp)
++    target_compile_definitions(nvcParGpu PRIVATE USE_MPI=0)
++    target_include_directories(nvcParGpu PRIVATE "${CMAKE_CURRENT_LIST_DIR}/commons")
++    target_compile_options(nvcParGpu PRIVATE --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET} -ffast-math)
 +    if (NOT STDPAR_TARGET MATCHES "^gfx9")
 +        target_compile_options(nvcParGpu PRIVATE --hipstdpar-interpose-alloc)
 +    endif ()
++    target_link_libraries(nvcParGpu PRIVATE tbb)
++    target_link_options(nvcParGpu PRIVATE --hipstdpar)
 +else ()
-+    target_compile_options(nvcParGpu PRIVATE -Mnouniform -Mfprelaxed -stdpar=gpu)
++    set(CMAKE_CXX_FLAGS "-w -fast -Mnouniform -Mfprelaxed -stdpar=multicore -std=c++11 -DUSE_MPI=0 --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/bin/")
++    add_executable(nvcParMulticore nvcPar.cpp)
++    target_include_directories(nvcParMulticore PRIVATE "${CMAKE_CURRENT_LIST_DIR}/commons")
++
++    set(CMAKE_CXX_FLAGS "-w -fast -Mnouniform -Mfprelaxed -stdpar=gpu -std=c++11 -DUSE_MPI=0")
++    add_executable(nvcParGpu nvcPar.cpp)
++    target_include_directories(nvcParGpu PRIVATE "${CMAKE_CURRENT_LIST_DIR}/commons")
 +endif()
-+target_link_libraries(nvcParGpu PRIVATE tbb)
-+target_link_options(nvcParGpu PRIVATE --hipstdpar)
+\ No newline at end of file
