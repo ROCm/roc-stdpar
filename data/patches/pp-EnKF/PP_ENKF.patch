@@ -30,7 +30,7 @@ index ebb51ee..e57076c 100644
  endif()
  
 diff --git a/lib/HIP_FFT.hpp b/lib/HIP_FFT.hpp
-index 9fa3b47..4a7c04f 100644
+index 9fa3b47..02d0b05 100644
 --- a/lib/HIP_FFT.hpp
 +++ b/lib/HIP_FFT.hpp
 @@ -16,7 +16,11 @@
@@ -271,18 +271,16 @@ index c2d2724..78c9812 100644
    const int q_[2][9] = {
      {-1,0,1,-1,0,1,-1,0,1},
 diff --git a/mini-apps/lbm2d-letkf/stdpar/CMakeLists.txt b/mini-apps/lbm2d-letkf/stdpar/CMakeLists.txt
-index 8d6ef7d..4db248f 100644
+index 8d6ef7d..331f604 100644
 --- a/mini-apps/lbm2d-letkf/stdpar/CMakeLists.txt
 +++ b/mini-apps/lbm2d-letkf/stdpar/CMakeLists.txt
-@@ -10,8 +10,13 @@ if(BACKEND STREQUAL "CUDA")
+@@ -10,8 +10,11 @@ if(BACKEND STREQUAL "CUDA")
  elseif(BACKEND STREQUAL "OPENMP")
      target_compile_options(lbm2d-letkf-stdpar PUBLIC -stdpar=multicore)
      target_compile_definitions(lbm2d-letkf-stdpar PUBLIC SIMD)
 +elseif(BACKEND STREQUAL "CLANG")
-+    find_package(rocrand REQUIRED)
 +    target_compile_options(lbm2d-letkf-stdpar PUBLIC --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET})
 +    target_link_options(lbm2d-letkf-stdpar PUBLIC --hipstdpar)
-+    target_link_libraries(lbm2d-letkf-stdpar PUBLIC roc::rocrand)
  else()
 -    message(FATAL_ERROR "No parallel backend specified. One of CUDA, and OPENMP must be On.")
 +    message(FATAL_ERROR "No parallel backend specified. One of CUDA, CLANG or OPENMP must be On.")
@@ -402,18 +400,18 @@ index 6d91926..fa8e092 100644
    assert(iter >= 0 && iter <= dom.nbiter_);
    auto ex  = ef->ex();
 diff --git a/mini-apps/vlp4d/stdpar/field.cpp b/mini-apps/vlp4d/stdpar/field.cpp
-index e3365bc..a61b381 100644
+index e3365bc..3480716 100644
 --- a/mini-apps/vlp4d/stdpar/field.cpp
 +++ b/mini-apps/vlp4d/stdpar/field.cpp
 @@ -5,7 +5,11 @@ void lu_solve_poisson(const Config& conf, Efield* ef);
  
  void field_rho(const Config& conf, const RealView4D &fn, Efield* ef) {
    const Domain dom = conf.dom_;
-+  #if defined(__clang__) // Workaround OMP issue.
-+    auto nx = dom.nxmax_[0], ny = dom.nxmax_[1], nvx = dom.nxmax_[2], nvy = dom.nxmax_[3];
-+  #else
-     auto [nx, ny, nvx, nvy] = dom.nxmax_;
-+  #endif
++#if defined(__clang__) // Workaround OMP issue.
++  auto nx = dom.nxmax_[0], ny = dom.nxmax_[1], nvx = dom.nxmax_[2], nvy = dom.nxmax_[3];
++#else
+   auto [nx, ny, nvx, nvy] = dom.nxmax_;
++#endif
    float64 dvx = dom.dx_[2], dvy = dom.dx_[3];
  
    const auto _fn = fn.mdspan();
@@ -421,16 +419,16 @@ index e3365bc..a61b381 100644
  
  void field_poisson(const Config& conf, Efield* ef) {
    const Domain dom = conf.dom_;
-+  #if defined(__clang__) // Workaround OMP issue.
-+    auto nx = dom.nxmax_[0], ny = dom.nxmax_[1], nvx = dom.nxmax_[2], nvy = dom.nxmax_[3];
-+  #else
-     auto [nx, ny, nvx, nvy] = dom.nxmax_;
-+  #endif
++#if defined(__clang__) // Workaround OMP issue.
++  auto nx = dom.nxmax_[0], ny = dom.nxmax_[1], nvx = dom.nxmax_[2], nvy = dom.nxmax_[3];
++#else
+   auto [nx, ny, nvx, nvy] = dom.nxmax_;
++#endif
    float64 dx = dom.dx_[0], dy = dom.dx_[1];
    float64 minPhyx = dom.minPhy_[0], minPhyy = dom.minPhy_[1];
  
 diff --git a/mini-apps/vlp4d/stdpar/types.hpp b/mini-apps/vlp4d/stdpar/types.hpp
-index fbb417c..d10db80 100644
+index fbb417c..47f4ba5 100644
 --- a/mini-apps/vlp4d/stdpar/types.hpp
 +++ b/mini-apps/vlp4d/stdpar/types.hpp
 @@ -8,13 +8,17 @@
@@ -444,11 +442,11 @@ index fbb417c..d10db80 100644
    #define SIMD_WIDTH 1
    using default_layout = stdex::layout_left;
    using default_iterate_layout = stdex::layout_left;
-+  #if defined(__HIPSTDPAR__)
-+    template <typename RealType> using Complex = std::complex<RealType>;
-+  #else
-     template <typename RealType> using Complex = thrust::complex<RealType>;
-+  #endif
++#if defined(__HIPSTDPAR__)
++  template <typename RealType> using Complex = std::complex<RealType>;
++#else
+   template <typename RealType> using Complex = thrust::complex<RealType>;
++#endif
  #else
    #include <complex>
    using default_layout = stdex::layout_right;
@@ -474,7 +472,7 @@ index 6549b6a..25d5e1c 100644
  
  target_link_libraries(google-tests-stdpar PUBLIC math_lib GTest::gtest_main)
 diff --git a/tests/stdpar/Types.hpp b/tests/stdpar/Types.hpp
-index 46370b2..7b22917 100644
+index 46370b2..b783b90 100644
 --- a/tests/stdpar/Types.hpp
 +++ b/tests/stdpar/Types.hpp
 @@ -10,7 +10,7 @@
@@ -487,7 +485,7 @@ index 46370b2..7b22917 100644
    #define SIMD_WIDTH 1
    using default_layout = stdex::layout_left;
 diff --git a/tests/stdpar/test_view.cpp b/tests/stdpar/test_view.cpp
-index 2d705c3..f084d7c 100644
+index 2d705c3..11692ea 100644
 --- a/tests/stdpar/test_view.cpp
 +++ b/tests/stdpar/test_view.cpp
 @@ -2,7 +2,7 @@
