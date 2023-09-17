@@ -56,6 +56,8 @@
     #include <thrust/uninitialized_fill.h>
     #include <thrust/unique.h>
 
+    #include <cstddef>
+    #include <cstdint>
     #include <execution>
     #include <functional>
     #include <iterator>
@@ -64,8 +66,6 @@
     #if defined(__HIPSTDPAR_INTERPOSE_ALLOC__)
         #include <hip/hip_runtime.h>
 
-        #include <cstddef>
-        #include <cstdint>
         #include <memory>
         #include <memory_resource>
         #include <stdexcept>
@@ -301,6 +301,19 @@
                 std::negation<std::is_member_function_pointer<Cs>>...>;
         }
 
+        template<typename I, typename = void>
+        struct Is_offloadable_iterator : std::false_type {};
+        template<typename I>
+        struct Is_offloadable_iterator<
+            I,
+            std::void_t<
+                decltype(std::declval<I>() < std::declval<I>()),
+                decltype(std::declval<I&>() += std::declval<std::ptrdiff_t>()),
+                decltype(std::declval<I>() + std::declval<std::ptrdiff_t>()),
+                decltype(std::declval<I>()[std::declval<std::ptrdiff_t>()]),
+                decltype(*std::declval<I>())>> : std::true_type
+        {};
+
         template<typename... Is>
         inline
         constexpr
@@ -309,19 +322,7 @@
             #if defined(__cpp_lib_concepts)
                 return (... && std::random_access_iterator<Is>);
             #else
-                return std::conjunction_v<
-                    std::negation<std::is_same<
-                        typename std::iterator_traits<Is>::iterator_category,
-                        std::input_iterator_tag>>...,
-                    std::negation<std::is_same<
-                        typename std::iterator_traits<Is>::iterator_category,
-                        std::output_iterator_tag>>...,
-                    std::negation<std::is_same<
-                        typename std::iterator_traits<Is>::iterator_category,
-                        std::forward_iterator_tag>>...,
-                    std::negation<std::is_same<
-                        typename std::iterator_traits<Is>::iterator_category,
-                        std::bidirectional_iterator_tag>>...>;
+                return std::conjunction_v<Is_offloadable_iterator<Is>...>;
             #endif
         }
 
@@ -1194,7 +1195,7 @@
                 !::hipstd::is_offloadable_iterator<I>() ||
                 !::hipstd::is_offloadable_callable<F>()>* = nullptr>
         inline
-        I for_each(execution::parallel_unsequenced_policy, I f, I l, F fn)
+        void for_each(execution::parallel_unsequenced_policy, I f, I l, F fn)
         {
             if constexpr (!::hipstd::is_offloadable_iterator<I>()) {
                 ::hipstd::unsupported_iterator_category<
