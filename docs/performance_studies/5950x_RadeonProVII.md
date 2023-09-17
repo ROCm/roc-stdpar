@@ -25,7 +25,6 @@ directly.
 ## Configuration
 
 - CPU: [AMD Ryzen 9 5950X](https://www.techpowerup.com/cpu-specs/ryzen-7-5800u.c2746)
-)
 - GPU: [AMD Radeon Pro VII](https://www.techpowerup.com/gpu-specs/radeon-pro-vii.c3575)
 - Motherboard: [MSI X570 GAMING PLUS](https://www.msi.com/Motherboard/MPG-X570-GAMING-PLUS/Specification)
 - RAM: 128GiB DDR4 3200MHz 51.2GB/s
