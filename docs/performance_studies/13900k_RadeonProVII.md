@@ -183,6 +183,28 @@ directly.
   - run parameterised with `Simulation duration == 100` and
     `Integration timestep == 0.1`
 
+## `nvstdpar`
+
+- [repo](https://github.com/mhaseeb123/nvstdpar)
+- [patch](../../data/patches/nvstdpar/NVSTDPAR.patch)
+
+| Test                  | A - CPU (s) | B - GPU (s) | A / B (higher is better) |
+|:---------------------:|:-----------:|:-----------:|:------------------------:|
+| 1D_STENCIL            | 103         | 8           | 13                       |
+| COMM-STUDY-POINTERS   | 2           | 11          | 0.2                      |
+| COMM-STUDY-VECTORS    | 2           | 17          | 0.1                      |
+| FFT - 536870912       | 17          | 50          | 0.3                      |
+| HEAT-EQUATION         | 590         | 50          | 12                       |
+
+- notes:
+  - tests parameterised as follows:
+    - `1D_STENCIL`: `--size 500000000 --nt 400`
+    - `COMM-STUDY-*`: default
+    - `FFT`: `-N 536870912 --time`
+    - `HEAT-EQUATION`: `-n=23000 -s=1000 --time`
+  - comparisons are based on the `stdpar` variants on the code, with the CPU
+    and the GPU executing the same source
+
 ## p2r-tests
 
 - [repo](https://github.com/cerati/p2r-tests)

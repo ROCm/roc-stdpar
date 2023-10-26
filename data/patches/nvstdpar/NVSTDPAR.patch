@@ -1,0 +1,316 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 810dad1..ad949bb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -27,8 +27,7 @@ endif()
+ 
+ # cmake min required
+ cmake_minimum_required(VERSION 3.22.1 FATAL_ERROR)
+-project(nvstdpar)
+-project(nvstdpar LANGUAGES CXX CUDA)
++project(nvstdpar LANGUAGES CXX)
+ 
+ # in source build warning
+ if("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_BINARY_DIR}")
+@@ -84,7 +83,11 @@ endif()
+ set(CXX_STANDARD_REQUIRED ON)
+ 
+ # required minimum CXX standard
+-set(CMAKE_CXX_STANDARD_REQUIRED 23)
++if(${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
++  set(CMAKE_CXX_STANDARD_REQUIRED 20)
++else()
++  set(CMAKE_CXX_STANDARD_REQUIRED 23)
++endif()
+ 
+ if(NOT CXX_STANDARD OR (CXX_STANDARD LESS ${CMAKE_CXX_STANDARD_REQUIRED}))
+   set(CXX_STANDARD ${CMAKE_CXX_STANDARD_REQUIRED})
+@@ -134,7 +137,7 @@ cpmaddpackage(
+   main # This will always pull the latest code from the `main` branch. You may
+        # also use a specific release version or tag
+   OPTIONS
+-  "STDEXEC_ENABLE_CUDA ON"
++  "STDEXEC_ENABLE_CUDA OFF"
+   "STDEXEC_BUILD_EXAMPLES OFF"
+   "STDEXEC_BUILD_TESTS OFF"
+   "STDEXEC_ENABLE_IO_URING_TESTS OFF"
+@@ -170,12 +173,27 @@ if(NOT OMP)
+ endif()
+ 
+ # need to add appropriate flags for stdexec
+-set(CMAKE_CXX_FLAGS
++if (NOT ${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
++  set(CMAKE_CXX_FLAGS
+       "${CMAKE_CXX_FLAGS} -stdpar=${STDPAR} -mp=${OMP}")
++endif()
+ 
+ # add -cudalib=cublas if -stdpar=gpu
+ if (STDPAR STREQUAL "gpu")
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_GPU")
++  if(${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
++    set(CMAKE_CXX_FLAGS
++       "${CMAKE_CXX_FLAGS} --hipstdpar --hipstdpar-path=${STDPAR_PATH} --offload-arch=${STDPAR_TARGET}"
++    )
++    if(NOT ${STDPAR_TARGET} MATCHES "^gfx9")
++      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --hipstdpar-interpose-alloc")
++    endif()
++    set(CMAKE_EXE_LINKER_FLAGS "--hipstdpar")
++  else()
++    set(CMAKE_CXX_FLAGS
++        "${CMAKE_CXX_FLAGS} -stdpar=${STDPAR} -mp=${OMP} --gcc-toolchain=/opt/cray/pe/gcc/12.2.0/bin/ -pthread"
++    )
++  endif()
+ else()
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -UUSE_GPU")
+ endif()
+diff --git a/apps/1d_stencil/CMakeLists.txt b/apps/1d_stencil/CMakeLists.txt
+index a71c608..5fb6f36 100644
+--- a/apps/1d_stencil/CMakeLists.txt
++++ b/apps/1d_stencil/CMakeLists.txt
+@@ -20,14 +20,14 @@ target_include_directories(
+           ${ARGPARSE_INCLUDE_DIR} ${MDSPAN_INCLUDE_DIR})
+ 
+ # TODO, fix cmake
+-add_executable(stencil_stdexec stencil_stdexec.cpp)
+-target_link_libraries(stencil_stdexec stdexec)
+-target_include_directories(
++if("${STDPAR}" STREQUAL "gpu" AND CUDA_FOUND)
++  add_executable(stencil_stdexec stencil_stdexec.cpp)
++  target_link_libraries(stencil_stdexec stdexec)
++  target_include_directories(
+     stencil_stdexec
+     PRIVATE ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include
+             ${ARGPARSE_INCLUDE_DIR} ${MDSPAN_INCLUDE_DIR})
+ 
+-if("${STDPAR}" STREQUAL "gpu")
+   add_executable(stencil_cuda stencil_cuda.cpp)
+   target_include_directories(
+     stencil_cuda
+diff --git a/apps/1d_stencil/stencil_omp.cpp b/apps/1d_stencil/stencil_omp.cpp
+index f19454a..247a2dc 100644
+--- a/apps/1d_stencil/stencil_omp.cpp
++++ b/apps/1d_stencil/stencil_omp.cpp
+@@ -26,7 +26,9 @@
+  */
+ #include "argparse/argparse.hpp"
+ #include "commons.hpp"
+-#include <omp.h>
++#if __has_include(<omp.h>)
++  #include <omp.h>
++#endif
+ 
+ // parameters
+ struct args_params_t : public argparse::Args {
+diff --git a/apps/1d_stencil/stencil_stdexec.cpp b/apps/1d_stencil/stencil_stdexec.cpp
+index 1338a5e..c10ced7 100644
+--- a/apps/1d_stencil/stencil_stdexec.cpp
++++ b/apps/1d_stencil/stencil_stdexec.cpp
+@@ -27,7 +27,7 @@
+ //
+ // This example provides a stdexec implementation for the 1D stencil code.
+ #include <exec/static_thread_pool.hpp>
+-#if defined(USE_GPU)
++#if defined(USE_GPU) and !defined(__HIPSTDPAR__)
+ #include <nvexec/multi_gpu_context.cuh>
+ #include <nvexec/stream_context.cuh>
+ #endif
+diff --git a/apps/1d_stencil/stencil_stdpar.cpp b/apps/1d_stencil/stencil_stdpar.cpp
+index 78aa244..29ff2bf 100644
+--- a/apps/1d_stencil/stencil_stdpar.cpp
++++ b/apps/1d_stencil/stencil_stdpar.cpp
+@@ -70,12 +70,12 @@ struct stepper {
+      auto next = space(next_ptr, size);
+ 
+     // parallel init
+-    std::for_each_n(std::execution::par, counting_iterator(0), size,
++    std::for_each_n(std::execution::par_unseq, counting_iterator(0), size,
+                     [=](std::size_t i) { current[i] = (Real_t)i; });
+ 
+     // Actual time step loop
+     for (std::size_t t = 0; t != nt; ++t) {
+-      std::for_each_n(std::execution::par, counting_iterator(0), size,
++      std::for_each_n(std::execution::par_unseq, counting_iterator(0), size,
+                       [=, k = k, dt = dt, dx = dx](int32_t i) {
+                         std::size_t left = (i == 0) ? size - 1 : i - 1;
+                         std::size_t right = (i == size - 1) ? 0 : i + 1;
+diff --git a/apps/choleskey/choleskey_stdpar.cpp b/apps/choleskey/choleskey_stdpar.cpp
+index 2b19b7d..32ac6b7 100644
+--- a/apps/choleskey/choleskey_stdpar.cpp
++++ b/apps/choleskey/choleskey_stdpar.cpp
+@@ -65,7 +65,7 @@ struct solver {
+ 
+         if (j == i)  // summation for diagonals
+         {
+-          sum = std::transform_reduce(std::execution::par, lower[j].cbegin(),
++          sum = std::transform_reduce(std::execution::par_unseq, lower[j].cbegin(),
+                                       lower[j].cbegin() + j, 0, std::plus{},
+                                       [=](int val) { return val * val; });
+ 
+@@ -73,7 +73,7 @@ struct solver {
+ 
+         } else {  // Evaluating L(i, j) using L(j, j)
+ 
+-          sum = std::transform_reduce(std::execution::par, lower[j].cbegin(),
++          sum = std::transform_reduce(std::execution::par_unseq, lower[j].cbegin(),
+                                       lower[j].cbegin() + j, lower[i].cbegin(),
+                                       0, std::plus<>(), multiplier_lambda);
+ 
+diff --git a/apps/choleskey/choleskey_stdpar_snd.cpp b/apps/choleskey/choleskey_stdpar_snd.cpp
+index 020dbc1..6fab06e 100644
+--- a/apps/choleskey/choleskey_stdpar_snd.cpp
++++ b/apps/choleskey/choleskey_stdpar_snd.cpp
+@@ -91,15 +91,15 @@ struct solver {
+                                 chunk_size += (piece == np - 1) ? remaining : 0;
+ 
+                                 sum_vec[piece] = std::transform_reduce(
+-                                    std::execution::par,
++                                    std::execution::par_unseq,
+                                     counting_iterator(start),
+                                     counting_iterator(start + chunk_size), 0,
+-                                    std ::plus{}, [=](int val) {
++                                    std ::plus{}, [=, &lower](int val) {
+                                       return lower[j][val] * lower[j][val];
+                                     });
+                               }) |
+                 stdexec::then([&sum_vec]() {
+-                  return std::reduce(std::execution::par, sum_vec.begin(),
++                  return std::reduce(std::execution::par_unseq, sum_vec.begin(),
+                                      sum_vec.end());
+                 });
+ 
+@@ -128,13 +128,13 @@ struct solver {
+                       chunk_size += (piece == np - 1) ? remaining : 0;
+ 
+                       sum_vec[piece] = std::transform_reduce(
+-                          std::execution::par, counting_iterator(start),
++                          std::execution::par_unseq, counting_iterator(start),
+                           counting_iterator(start + chunk_size), 0,
+                           std ::plus{},
+-                          [=](int k) { return lower[j][k] * lower[i][k]; });
++                          [=, &lower](int k) { return lower[j][k] * lower[i][k]; });
+                     }) |
+                 stdexec::then([&sum_vec]() {
+-                  return std::reduce(std::execution::par, sum_vec.begin(),
++                  return std::reduce(std::execution::par_unseq, sum_vec.begin(),
+                                      sum_vec.end());
+                 });
+ 
+diff --git a/apps/fft/CMakeLists.txt b/apps/fft/CMakeLists.txt
+index 10e89c1..088a5e8 100644
+--- a/apps/fft/CMakeLists.txt
++++ b/apps/fft/CMakeLists.txt
+@@ -3,7 +3,7 @@ project(fft LANGUAGES CXX)
+ file(GLOB CPP_SOURCES "*.cpp")
+ 
+ # add -cudalib=cublas if -stdpar=gpu
+-if (STDPAR STREQUAL "gpu")
++if (STDPAR STREQUAL "gpu" AND NOT ${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -cudalib=cublas")
+ endif()
+ 
+@@ -30,7 +30,7 @@ foreach(source_file ${CPP_SOURCES})
+   target_include_directories(
+     ${exec_name}
+     PRIVATE ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include
+-            ${ARGPARSE_INCLUDE_DIR} ${MDSPAN_INCLUDE_DIR})
++            ${ARGPARSE_INCLUDE_DIR} ${MDSPAN_INCLUDE_DIR} ${LINALG_INCLUDE_DIR})
+ 
+   # uncomment only if using nvc++/23.1 - no need if nvc++/23.7
+   # target_link_directories(${exec_name} PRIVATE /opt/nvidia/hpc_sdk/Linux_x86_64/23.1/math_libs/lib64)
+diff --git a/apps/fft/fft-stdexec.cpp b/apps/fft/fft-stdexec.cpp
+index 9a3e7fc..db42b78 100644
+--- a/apps/fft/fft-stdexec.cpp
++++ b/apps/fft/fft-stdexec.cpp
+@@ -172,7 +172,7 @@ int main(int argc, char* argv[])
+         case sch_t::CPU:
+             y = fft(x_n.data(), exec::static_thread_pool(max_threads).get_scheduler(), N, max_threads, args.debug);
+             break;
+-#if defined(USE_GPU)
++#if defined(USE_GPU) && !defined(__HIPSTDPAR__)
+         case sch_t::GPU:
+             y = fft(x_n.data(), nvexec::stream_context().get_scheduler(), N, 1024*108, args.debug);
+             break;
+@@ -211,7 +211,7 @@ int main(int argc, char* argv[])
+             case sch_t::CPU:
+                 verify = x_n.isFFT(y_n, exec::static_thread_pool(max_threads).get_scheduler());
+                 break;
+-#if defined (USE_GPU)
++#if defined (USE_GPU) && !defined(__HIPSTDPAR__)
+             case sch_t::GPU:
+                 verify = x_n.isFFT(y_n, nvexec::stream_context().get_scheduler());
+                 break;
+diff --git a/apps/fft/fft.hpp b/apps/fft/fft.hpp
+index 48883dc..b921bdd 100644
+--- a/apps/fft/fft.hpp
++++ b/apps/fft/fft.hpp
+@@ -36,7 +36,7 @@
+ #include <stdexec/execution.hpp>
+ #include <exec/static_thread_pool.hpp>
+ 
+-#if defined(USE_GPU)
++#if defined(USE_GPU) && !defined(__HIPSTDPAR__)
+   #include <nvexec/stream_context.cuh>
+   #include <nvexec/multi_gpu_context.cuh>
+ using namespace nvexec;
+@@ -194,7 +194,7 @@ public:
+     signalGenerator(type, threads);
+   }
+ 
+-  void signalGenerator(sig_type type=sig_type::box, int threads = std::thread::hardware_concurrency())
++  void signalGenerator(sig_type type=sig_type::box, unsigned int threads = std::thread::hardware_concurrency())
+   {
+     int N = y.size();
+ 
+@@ -310,7 +310,7 @@ public:
+     ex::sync_wait(init);
+ 
+     // compute Y[n] = dft(x[n]) = WNk * x[n]
+-    stdex::linalg::matrix_product(std::execution::par, A, mdy, mdY);
++    std::experimental::linalg::matrix_product(std::execution::par, A, mdy, mdY);
+ 
+     // compare the computed Y[n] (dft) with X[n](fft)
+     ex::sender auto verify = ex::transfer_just(sch, ret, X_ptr, Y_ptr)
+diff --git a/apps/heat-equation/CMakeLists.txt b/apps/heat-equation/CMakeLists.txt
+index f09668f..d4445d5 100644
+--- a/apps/heat-equation/CMakeLists.txt
++++ b/apps/heat-equation/CMakeLists.txt
+@@ -11,6 +11,12 @@ foreach(source_file ${CPP_SOURCES})
+       message(STATUS "Skipping ${source_file} as stdpar=${STDPAR}")
+       continue()
+     endif()
++  elseif(${CMAKE_CXX_COMPILER_ID} MATCHES "Clang" AND "${source_file}"
++                                                       MATCHES ".*cuda.*"
++                                                  OR "${source_file}"
++                                                  MATCHES ".*stdexec.*")
++    message(STATUS "Skipping ${source_file} due to using HIPSTDPAR")
++    continue()
+   endif()
+ 
+   # get the file name without an extension
+diff --git a/apps/heat-equation/heat-equation.hpp b/apps/heat-equation/heat-equation.hpp
+index 43e4940..9b50496 100644
+--- a/apps/heat-equation/heat-equation.hpp
++++ b/apps/heat-equation/heat-equation.hpp
+@@ -34,7 +34,7 @@
+ #include <stdexec/execution.hpp>
+ #include <exec/static_thread_pool.hpp>
+ 
+-#if defined(USE_GPU)
++#if defined(USE_GPU) && !defined(__HIPSTDPAR__)
+   #include <nvexec/stream_context.cuh>
+   #include <nvexec/multi_gpu_context.cuh>
+ using namespace nvexec;
+diff --git a/externals/CMakeLists.txt b/externals/CMakeLists.txt
+index b6e9828..b2f18c3 100644
+--- a/externals/CMakeLists.txt
++++ b/externals/CMakeLists.txt
+@@ -159,6 +159,9 @@ add_subdirectory(argparse)
+ message(STATUS "Adding externals/magic_enum...")
+ add_subdirectory(magic_enum)
+ 
++set(LINALG_INCLUDE_DIR
++    ${CMAKE_CURRENT_SOURCE_DIR}/std-linalg
++    CACHE PATH "stdlinalg include directory")
+ set(MDSPAN_INCLUDE_DIR
+     ${CMAKE_CURRENT_SOURCE_DIR}/mdspan/include
+     CACHE PATH "mdspan include directory")
