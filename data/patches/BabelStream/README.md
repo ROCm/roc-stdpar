@@ -1,7 +1,7 @@
 # BabelStream
 
 - url: <https://github.com/UoB-HPC/BabelStream>
-- branch: `main` at `7d570547edf0f0222d022d8cd1d67f768e666738`
+- branch: `main` at `8389fc43a327e23e72611957cc92d4586e85352c`
 - notes:
   - the following variables are added to CMake:
     - `CLANG_STDPAR_PATH`: specifies the path to the forwarding header
