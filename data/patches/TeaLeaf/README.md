@@ -1,4 +1,4 @@
-# miniBUDE
+# TeaLeaf
 
 - url: <https://github.com/UoB-HPC/TeaLeaf>
 - branch: `master` at `5ee7d753bbb8e8d60b945c0359e00c07aafbab81`
