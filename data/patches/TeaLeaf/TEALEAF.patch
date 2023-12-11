@@ -29,7 +29,7 @@ index 409a285..04a7961 100644
 +    if (CLANG_OFFLOAD)
 +        set(CLANG_FLAGS
 +                --hipstdpar
-+                --hipstdpar-path=${CLANG_HIPSTDPAR_PATH}
++                --hipstdpar-path=${CLANG_STDPAR_PATH}
 +                --offload-arch=${CLANG_OFFLOAD})
 +        if (NOT CLANG_OFFLOAD MATCHES "^gfx9")
 +                list(APPEND CLANG_FLAGS --hipstdpar-interpose-alloc)
