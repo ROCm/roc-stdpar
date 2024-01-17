@@ -1185,7 +1185,7 @@
         inline
         void for_each(execution::parallel_unsequenced_policy, I f, I l, F fn)
         {
-            return ::thrust::for_each(::thrust::device, f, l, ::std::move(fn));
+            (void)::thrust::for_each(::thrust::device, f, l, ::std::move(fn));
         }
 
         template<
@@ -1205,8 +1205,7 @@
                 ::hipstd::unsupported_callable_type<F>();
             }
 
-            return
-                ::std::for_each(::std::execution::par, f, l, ::std::move(fn));
+            (void)::std::for_each(::std::execution::par, f, l, ::std::move(fn));
         }
         // END FOR_EACH
 
